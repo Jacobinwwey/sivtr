@@ -270,7 +270,7 @@ pub enum CopySubcommand {
 
     /// Copy content from the current Codex conversation session
     #[command(after_help = COPY_CODEX_AFTER_HELP)]
-    Codex(CodexCopyCommand),
+    Codex(Box<CodexCopyCommand>),
 }
 
 #[derive(Args, Debug, Clone)]

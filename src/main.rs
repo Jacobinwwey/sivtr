@@ -56,7 +56,7 @@ fn run() -> Result<()> {
             Some(CopySubcommand::Cmd(sub_args)) => {
                 run_copy_simple(&sub_args, CopyMode::CommandOnly, false)?
             }
-            Some(CopySubcommand::Codex(sub_args)) => run_codex_copy(sub_args)?,
+            Some(CopySubcommand::Codex(sub_args)) => run_codex_copy(*sub_args)?,
             None => run_copy(&args.args, CopyMode::Both, true)?,
         },
         Some(Commands::Ci(args)) => run_copy(&args, CopyMode::InputOnly, true)?,
