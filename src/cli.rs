@@ -97,6 +97,8 @@ Defaults:
 Session Resolution:
   By default, sivtr reads the newest Codex rollout whose `cwd`
   matches the current working directory.
+  `--session N` picks the Nth newest recorded Codex session.
+  `--session ID` matches a session id or id prefix.
 
 Selector Semantics:
   Selection is relative to the newest matching Codex item.
@@ -115,8 +117,12 @@ Filters:
 
 Examples:
   sivtr copy codex
+  sivtr copy codex --session 2
+  sivtr copy codex --session 019df7fb
   sivtr copy codex 2
   sivtr copy codex 2..4
+  sivtr copy codex out --session 2 --print
+  sivtr copy codex --session 2 --pick
   sivtr copy codex out --print
   sivtr copy codex out --pick
   sivtr copy codex tool --regex error
@@ -311,6 +317,16 @@ pub struct CopySimpleArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct CodexCopyArgs {
+    #[command(flatten)]
+    pub common: CopyCommonArgs,
+
+    /// Which Codex session to read; `1` means the newest session, or pass an id / id prefix
+    #[arg(long, value_name = "N|ID")]
+    pub session: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
 #[command(group(
     ArgGroup::new("diff_content_mode")
         .args(["output", "block", "input", "cmd"])
@@ -402,22 +418,22 @@ pub struct CodexCopyCommand {
     pub mode: Option<CodexCopyMode>,
 
     #[command(flatten)]
-    pub args: CopySimpleArgs,
+    pub args: CodexCopyArgs,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum CodexCopyMode {
     /// Copy the last user message
-    In(CopySimpleArgs),
+    In(CodexCopyArgs),
 
     /// Copy the last assistant reply
-    Out(CopySimpleArgs),
+    Out(CodexCopyArgs),
 
     /// Copy the last tool output
-    Tool(CopySimpleArgs),
+    Tool(CodexCopyArgs),
 
     /// Copy the whole parsed session
-    All(CopySimpleArgs),
+    All(CodexCopyArgs),
 }
 
 #[cfg(test)]
@@ -549,6 +565,40 @@ mod tests {
                 Some(CopySubcommand::Codex(codex)) => {
                     assert_eq!(codex.args.common.selector.as_deref(), Some("2..4"));
                 }
+                _ => panic!("expected copy codex mode"),
+            },
+            _ => panic!("expected copy command"),
+        }
+    }
+
+    #[test]
+    fn codex_copy_accepts_session_selector() {
+        let cli = Cli::try_parse_from(["sivtr", "copy", "codex", "--session", "2"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Copy(cmd)) => match cmd.mode {
+                Some(CopySubcommand::Codex(codex)) => {
+                    assert_eq!(codex.args.session.as_deref(), Some("2"));
+                }
+                _ => panic!("expected copy codex mode"),
+            },
+            _ => panic!("expected copy command"),
+        }
+    }
+
+    #[test]
+    fn codex_copy_nested_mode_accepts_session_selector() {
+        let cli = Cli::try_parse_from(["sivtr", "copy", "codex", "out", "--session", "019df7fb"])
+            .unwrap();
+
+        match cli.command {
+            Some(Commands::Copy(cmd)) => match cmd.mode {
+                Some(CopySubcommand::Codex(codex)) => match codex.mode {
+                    Some(CodexCopyMode::Out(args)) => {
+                        assert_eq!(args.session.as_deref(), Some("019df7fb"));
+                    }
+                    _ => panic!("expected copy codex out mode"),
+                },
                 _ => panic!("expected copy codex mode"),
             },
             _ => panic!("expected copy command"),

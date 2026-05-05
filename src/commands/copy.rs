@@ -65,6 +65,7 @@ pub enum CodexSelectionMode {
 #[derive(Clone, Copy, Debug)]
 pub struct CodexCopyRequest<'a> {
     pub selector: Option<&'a str>,
+    pub session_selector: Option<&'a str>,
     pub pick: bool,
     pub pick_current_session: bool,
     pub selection_mode: CodexSelectionMode,
@@ -232,18 +233,19 @@ pub fn execute(request: CopyRequest<'_>) -> Result<()> {
 }
 
 pub fn execute_codex(request: CodexCopyRequest<'_>) -> Result<()> {
-    if request.pick && !request.pick_current_session {
+    if request.pick && !request.pick_current_session && request.session_selector.is_none() {
         return execute_codex_session_pick(request);
     }
 
-    let path = if request.pick && request.pick_current_session {
+    let path = if request.pick && request.pick_current_session && request.session_selector.is_none()
+    {
         let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
         match resolve_current_codex_session_with_blocks(&cwd)? {
             Some(path) => return execute_current_codex_session_pick(request, &path),
             None => return execute_codex_session_pick(request),
         }
     } else {
-        resolve_codex_session_path(request.pick_current_session)?
+        resolve_codex_session_path(request.session_selector, request.pick_current_session)?
     };
     let session = parse_session_file(&path)?;
 
@@ -999,13 +1001,81 @@ fn finish_copy(text: String, print_full: bool, success_message: String) -> Resul
     Ok(())
 }
 
-fn resolve_codex_session_path(pick_current_session: bool) -> Result<std::path::PathBuf> {
+fn resolve_codex_session_path(
+    session_selector: Option<&str>,
+    pick_current_session: bool,
+) -> Result<std::path::PathBuf> {
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    if let Some(selector) = session_selector {
+        return resolve_explicit_codex_session_path(selector);
+    }
     if pick_current_session {
         return resolve_current_codex_pick_session_path(&cwd);
     }
 
     find_current_session(&cwd)?.context("No Codex sessions found")
+}
+
+fn resolve_explicit_codex_session_path(selector: &str) -> Result<std::path::PathBuf> {
+    let sessions = list_recent_sessions(None)?;
+    resolve_codex_session_selector(&sessions, selector)
+}
+
+fn resolve_codex_session_selector(
+    sessions: &[CodexSessionInfo],
+    selector: &str,
+) -> Result<std::path::PathBuf> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        anyhow::bail!(
+            "Empty Codex session selector. Use `--session 2`, `--session <id>`, or `--pick`."
+        );
+    }
+
+    if let Ok(recent) = selector.parse::<usize>() {
+        return resolve_recent_codex_session_selector(sessions, recent);
+    }
+
+    sessions
+        .iter()
+        .find(|session| codex_session_matches_selector(session, selector))
+        .map(|session| session.path.clone())
+        .with_context(|| {
+            format!(
+                "No Codex session matched `{selector}`. Use `--pick` to browse recent sessions."
+            )
+        })
+}
+
+fn resolve_recent_codex_session_selector(
+    sessions: &[CodexSessionInfo],
+    recent: usize,
+) -> Result<std::path::PathBuf> {
+    if recent == 0 {
+        anyhow::bail!("Session selectors are 1-based. Use `--session 1` for the newest session.");
+    }
+
+    sessions
+        .get(recent - 1)
+        .map(|session| session.path.clone())
+        .with_context(|| {
+            format!(
+                "Only {} Codex session(s) found. Try a smaller `--session` value or `--pick`.",
+                sessions.len()
+            )
+        })
+}
+
+fn codex_session_matches_selector(session: &CodexSessionInfo, selector: &str) -> bool {
+    session
+        .id
+        .as_deref()
+        .is_some_and(|id| id == selector || id.starts_with(selector))
+        || session
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains(selector))
 }
 
 fn resolve_current_codex_pick_session_path(cwd: &std::path::Path) -> Result<std::path::PathBuf> {
@@ -1774,9 +1844,12 @@ mod tests {
     use super::picker::{apply_range_toggle, selection_from_entries, PickEntry};
     use super::{
         build_codex_vim_view, build_output_preview, codex_session_preview, filter_lines_by_regex,
-        filter_lines_by_spec, format_block, is_vim_command, vim_single_quote, CodexBlock,
-        CodexBlockKind, CodexSession, CommandBlock, CommandSelection, CopyMode, TextPair,
+        filter_lines_by_spec, format_block, is_vim_command, resolve_codex_session_selector,
+        vim_single_quote, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo, CommandBlock,
+        CommandSelection, CopyMode, TextPair,
     };
+    use std::path::PathBuf;
+    use std::time::SystemTime;
 
     #[test]
     fn formats_modes() {
@@ -2068,6 +2141,52 @@ mod tests {
         assert_eq!(
             codex_session_preview(&session).as_deref(),
             Some("first actual task")
+        );
+    }
+
+    #[test]
+    fn resolves_recent_codex_session_selector() {
+        let sessions = vec![
+            CodexSessionInfo {
+                path: PathBuf::from("newest.jsonl"),
+                id: Some("019df7fb-8289-7fb0-97c3-fe5307ee1b0a".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+            CodexSessionInfo {
+                path: PathBuf::from("older.jsonl"),
+                id: Some("019df748-161a-7ba2-b767-582f65ea0ac7".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+        ];
+
+        assert_eq!(
+            resolve_codex_session_selector(&sessions, "2").unwrap(),
+            PathBuf::from("older.jsonl")
+        );
+    }
+
+    #[test]
+    fn resolves_codex_session_selector_by_id_prefix() {
+        let sessions = vec![
+            CodexSessionInfo {
+                path: PathBuf::from("rollout-019df7fb-8289.jsonl"),
+                id: Some("019df7fb-8289-7fb0-97c3-fe5307ee1b0a".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+            CodexSessionInfo {
+                path: PathBuf::from("rollout-019df748-161a.jsonl"),
+                id: Some("019df748-161a-7ba2-b767-582f65ea0ac7".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+        ];
+
+        assert_eq!(
+            resolve_codex_session_selector(&sessions, "019df748").unwrap(),
+            PathBuf::from("rollout-019df748-161a.jsonl")
         );
     }
 }

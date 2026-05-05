@@ -7,6 +7,17 @@ description: 从当前 Codex 会话复制有用块。
 
 当你想复用最后一个回答、输入、工具输出，或整个解析后的会话，但不想手动打开 Codex transcript 时，这个功能很有用。
 
+## 指定更早的会话
+
+```bash
+sivtr copy codex --session 2
+sivtr copy codex --session 019df7fb
+sivtr copy codex out --session 2 --print
+sivtr copy codex --session 2 --pick
+```
+
+`--session N` 表示第 N 个最近的会话；`--session ID` 按 session id 或其前缀匹配。
+
 ## 默认行为
 
 ```bash

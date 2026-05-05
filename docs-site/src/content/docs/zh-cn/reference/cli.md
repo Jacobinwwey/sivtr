@@ -121,6 +121,8 @@ sivtr copy cmd --pick
 sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
 ```
 
+`--session N` 选择第 N 个最近的 Codex 会话。`--session ID` 按 session id 或其前缀匹配。
+
 模式：
 
 | 模式 | 含义 |
@@ -135,8 +137,12 @@ sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
 
 ```bash
 sivtr copy codex
+sivtr copy codex --session 2
+sivtr copy codex --session 019df7fb
 sivtr copy codex 2
 sivtr copy codex 2..4
+sivtr copy codex out --session 2 --print
+sivtr copy codex --session 2 --pick
 sivtr copy codex out --print
 sivtr copy codex out --pick
 sivtr copy codex tool --regex error
