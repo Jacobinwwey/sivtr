@@ -7,6 +7,17 @@ description: Copy useful blocks from the current Codex session.
 
 This is useful when you want to reuse the last answer, input, tool output, or whole parsed session without opening the Codex transcript manually.
 
+## Target a previous session
+
+```bash
+sivtr copy codex --session 2
+sivtr copy codex --session 019df7fb
+sivtr copy codex out --session 2 --print
+sivtr copy codex --session 2 --pick
+```
+
+Use `--session N` for the Nth newest recorded session, or `--session ID` for a specific session id / id prefix.
+
 ## Defaults
 
 ```bash

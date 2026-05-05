@@ -8,8 +8,8 @@ use anyhow::Result;
 use clap::Parser;
 
 use cli::{
-    Cli, CodexCopyCommand, CodexCopyMode, Commands, CopyArgs, CopySimpleArgs, CopySubcommand,
-    DiffArgs, HotkeyPickCodexArgs, HotkeyServeArgs,
+    Cli, CodexCopyArgs, CodexCopyCommand, CodexCopyMode, Commands, CopyArgs, CopySimpleArgs,
+    CopySubcommand, DiffArgs, HotkeyPickCodexArgs, HotkeyServeArgs,
 };
 use command_blocks::CommandBlockTextMode;
 use commands::copy::{CodexCopyRequest, CodexSelectionMode, CopyMode, CopyRequest};
@@ -131,9 +131,10 @@ fn run_codex_copy(cmd: CodexCopyCommand) -> Result<()> {
     }
 }
 
-fn run_codex_copy_args(args: &CopySimpleArgs, selection_mode: CodexSelectionMode) -> Result<()> {
+fn run_codex_copy_args(args: &CodexCopyArgs, selection_mode: CodexSelectionMode) -> Result<()> {
     commands::copy::execute_codex(CodexCopyRequest {
         selector: args.common.selector.as_deref(),
+        session_selector: args.session.as_deref(),
         pick: args.common.pick,
         pick_current_session: false,
         selection_mode,

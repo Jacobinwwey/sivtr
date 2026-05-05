@@ -121,6 +121,8 @@ sivtr copy cmd --pick
 sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
 ```
 
+`--session N` selects the Nth newest recorded Codex session. `--session ID` matches a session id or id prefix.
+
 Modes:
 
 | Mode | Meaning |
@@ -135,8 +137,12 @@ Examples:
 
 ```bash
 sivtr copy codex
+sivtr copy codex --session 2
+sivtr copy codex --session 019df7fb
 sivtr copy codex 2
 sivtr copy codex 2..4
+sivtr copy codex out --session 2 --print
+sivtr copy codex --session 2 --pick
 sivtr copy codex out --print
 sivtr copy codex out --pick
 sivtr copy codex tool --regex error

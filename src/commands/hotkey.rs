@@ -54,6 +54,7 @@ pub fn pick_codex(args: &HotkeyPickCodexArgs) -> Result<()> {
     let result = std::panic::catch_unwind(|| {
         copy::execute_codex(CodexCopyRequest {
             selector: None,
+            session_selector: None,
             pick: true,
             pick_current_session: true,
             selection_mode: CodexSelectionMode::LastTurn,
