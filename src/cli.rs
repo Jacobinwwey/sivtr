@@ -324,6 +324,10 @@ pub struct CodexCopyArgs {
     /// Which Codex session to read; `1` means the newest session, or pass an id / id prefix
     #[arg(long, value_name = "N|ID")]
     pub session: Option<String>,
+
+    /// Maximum parsed Codex blocks to keep; `0` means unlimited
+    #[arg(long, value_name = "N")]
+    pub max_blocks: Option<usize>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -410,6 +414,10 @@ pub struct HotkeyPickCodexArgs {
     /// Working directory used to resolve the current Codex session
     #[arg(long, value_name = "PATH")]
     pub cwd: PathBuf,
+
+    /// Resume or target a specific Codex session by id / id prefix
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -606,6 +614,21 @@ mod tests {
     }
 
     #[test]
+    fn codex_copy_accepts_max_blocks_override() {
+        let cli = Cli::try_parse_from(["sivtr", "copy", "codex", "--max-blocks", "0"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Copy(cmd)) => match cmd.mode {
+                Some(CopySubcommand::Codex(codex)) => {
+                    assert_eq!(codex.args.max_blocks, Some(0));
+                }
+                _ => panic!("expected copy codex mode"),
+            },
+            _ => panic!("expected copy command"),
+        }
+    }
+
+    #[test]
     fn hotkey_start_accepts_chord_override() {
         let cli = Cli::try_parse_from(["sivtr", "hotkey", "start", "--chord", "alt+y"]).unwrap();
 
@@ -624,6 +647,27 @@ mod tests {
 
         match cli.command {
             Some(Commands::HotkeyPickCodex(args)) => assert_eq!(args.cwd, PathBuf::from(".")),
+            _ => panic!("expected hotkey-pick-codex command"),
+        }
+    }
+
+    #[test]
+    fn hotkey_pick_codex_accepts_session() {
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "hotkey-pick-codex",
+            "--cwd",
+            ".",
+            "--session",
+            "019df7fb",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(Commands::HotkeyPickCodex(args)) => {
+                assert_eq!(args.cwd, PathBuf::from("."));
+                assert_eq!(args.session.as_deref(), Some("019df7fb"));
+            }
             _ => panic!("expected hotkey-pick-codex command"),
         }
     }

@@ -22,6 +22,10 @@ context-aware Codex picker:
 sivtr hotkey-pick-codex --cwd .
 ```
 
+If the terminal was opened from a live `codex resume` session, `sivtr` prefers
+that exact session id first. Otherwise it falls back to the newest non-empty
+session whose `cwd` matches the workspace.
+
 ## Settings
 
 | Setting | Default | Purpose |

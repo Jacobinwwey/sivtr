@@ -121,7 +121,7 @@ sivtr copy cmd --pick
 sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
 ```
 
-`--session N` selects the Nth newest recorded Codex session. `--session ID` matches a session id or id prefix.
+`--session N` selects the Nth newest recorded Codex session. `--session ID` matches a session id or id prefix. `--max-blocks N` keeps only the latest `N` parsed blocks for large sessions, and `0` means unlimited.
 
 Modes:
 
@@ -143,6 +143,8 @@ sivtr copy codex 2
 sivtr copy codex 2..4
 sivtr copy codex out --session 2 --print
 sivtr copy codex --session 2 --pick
+sivtr copy codex all --max-blocks 0
+sivtr copy codex all --max-blocks 10000
 sivtr copy codex out --print
 sivtr copy codex out --pick
 sivtr copy codex tool --regex error

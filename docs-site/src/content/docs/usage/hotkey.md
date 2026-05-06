@@ -60,8 +60,10 @@ sivtr hotkey-pick-codex --cwd <daemon-working-directory>
 ```
 
 That internal command first opens the newest non-empty Codex session for the
-daemon working directory. If that session is missing or empty, it falls back to
-the session picker.
+daemon working directory. If the hotkey was pressed from a live `codex` or
+`codex resume` shell, it passes that session id forward and opens that exact
+session first. If the current session is missing or empty, it falls back to the
+session picker.
 
 Plain `sivtr copy codex --pick` is different: it always starts with the session
 picker.

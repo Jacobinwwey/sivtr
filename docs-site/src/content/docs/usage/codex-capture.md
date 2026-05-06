@@ -3,7 +3,7 @@ title: Codex Capture
 description: Copy useful blocks from the current Codex session.
 ---
 
-`sivtr copy codex` reads Codex rollout JSONL files from `~/.codex/sessions`. By default it chooses the newest session whose `cwd` matches the current working directory.
+`sivtr copy codex` reads Codex rollout JSONL files from `~/.codex/sessions`. Inside an active `codex` or `codex resume` shell, it prefers that exact session id first. Otherwise it chooses the newest session whose `cwd` matches the current working directory.
 
 This is useful when you want to reuse the last answer, input, tool output, or whole parsed session without opening the Codex transcript manually.
 
@@ -14,9 +14,11 @@ sivtr copy codex --session 2
 sivtr copy codex --session 019df7fb
 sivtr copy codex out --session 2 --print
 sivtr copy codex --session 2 --pick
+sivtr copy codex all --max-blocks 0
+sivtr copy codex all --max-blocks 10000
 ```
 
-Use `--session N` for the Nth newest recorded session, or `--session ID` for a specific session id / id prefix.
+Use `--session N` for the Nth newest recorded session, or `--session ID` for a specific session id / id prefix. Use `--max-blocks N` to keep only the latest `N` parsed blocks from a large transcript, or `--max-blocks 0` for a full import.
 
 ## Defaults
 
@@ -77,7 +79,7 @@ sivtr copy codex out --pick
 
 The plain CLI picker starts with the session list, then lets you choose one or more units from that session. Press `t` to open the Vim-style view. In Codex views, `T` toggles tool content when an alternate full view is available.
 
-Context-aware launchers such as the Windows hotkey and VS Code extension first open the newest non-empty session for the current workspace. If that session is missing or empty, they fall back to the session list.
+Context-aware launchers such as the Windows hotkey and VS Code extension first open the exact current session when they can see a live Codex thread id. Otherwise they open the newest non-empty session for the current workspace. If that session is missing or empty, they fall back to the session list.
 
 ## Windows hotkey
 

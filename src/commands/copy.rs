@@ -15,7 +15,7 @@ use crate::commands::command_block_selector::{parse_selector, resolve_selector, 
 use sivtr_core::capture::scrollback;
 use sivtr_core::codex::{
     find_current_session, find_session_by_id, format_blocks, list_recent_sessions,
-    parse_session_file, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo,
+    parse_session_file_with_limit, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo,
 };
 use sivtr_core::session::{self, SessionEntry};
 
@@ -66,6 +66,7 @@ pub enum CodexSelectionMode {
 pub struct CodexCopyRequest<'a> {
     pub selector: Option<&'a str>,
     pub session_selector: Option<&'a str>,
+    pub max_blocks: Option<usize>,
     pub pick: bool,
     pub pick_current_session: bool,
     pub selection_mode: CodexSelectionMode,
@@ -247,7 +248,7 @@ pub fn execute_codex(request: CodexCopyRequest<'_>) -> Result<()> {
     } else {
         resolve_codex_session_path(request.session_selector, request.pick_current_session)?
     };
-    let session = parse_session_file(&path)?;
+    let session = load_codex_session(&path, request.max_blocks)?;
 
     if session.blocks.is_empty() {
         eprintln!("sivtr: Codex session has no parsed conversation blocks");
@@ -274,7 +275,11 @@ pub fn execute_codex(request: CodexCopyRequest<'_>) -> Result<()> {
 
 fn execute_codex_session_pick(request: CodexCopyRequest<'_>) -> Result<()> {
     let mut terminal = init_tui()?;
-    let result = pick_codex_session_content_on_terminal(&mut terminal, request.selection_mode);
+    let result = pick_codex_session_content_on_terminal(
+        &mut terminal,
+        request.selection_mode,
+        request.max_blocks,
+    );
     restore_tui(&mut terminal)?;
     let (units, selection) = result?;
     finish_codex_copy(&units, selection, &request)
@@ -285,8 +290,12 @@ fn execute_current_codex_session_pick(
     path: &std::path::Path,
 ) -> Result<()> {
     let mut terminal = init_tui()?;
-    let result =
-        pick_current_codex_session_content_on_terminal(&mut terminal, path, request.selection_mode);
+    let result = pick_current_codex_session_content_on_terminal(
+        &mut terminal,
+        path,
+        request.selection_mode,
+        request.max_blocks,
+    );
     restore_tui(&mut terminal)?;
     let (units, selection) = result?;
     finish_codex_copy(&units, selection, &request)
@@ -295,9 +304,10 @@ fn execute_current_codex_session_pick(
 fn pick_codex_session_content_on_terminal(
     terminal: &mut crate::tui::terminal::Tui,
     selection_mode: CodexSelectionMode,
+    max_blocks: Option<usize>,
 ) -> Result<(Vec<TextPair>, CommandSelection)> {
     let sessions = list_recent_sessions(None)?;
-    let choices = build_codex_session_choices(&sessions, selection_mode)?;
+    let choices = build_codex_session_choices(&sessions, selection_mode, max_blocks)?;
     if choices.is_empty() {
         anyhow::bail!("No Codex sessions with selectable content found");
     }
@@ -308,8 +318,9 @@ fn pick_current_codex_session_content_on_terminal(
     terminal: &mut crate::tui::terminal::Tui,
     path: &std::path::Path,
     selection_mode: CodexSelectionMode,
+    max_blocks: Option<usize>,
 ) -> Result<(Vec<TextPair>, CommandSelection)> {
-    let session = parse_session_file(path)?;
+    let session = load_codex_session(path, max_blocks)?;
     let info = CodexSessionInfo {
         path: path.to_path_buf(),
         id: session.id.clone(),
@@ -338,11 +349,12 @@ enum CodexHierarchyFocus {
 fn build_codex_session_choices(
     sessions: &[CodexSessionInfo],
     selection_mode: CodexSelectionMode,
+    max_blocks: Option<usize>,
 ) -> Result<Vec<CodexSessionChoice>> {
     let mut choices = Vec::new();
 
     for info in sessions.iter().take(PICK_LIMIT) {
-        let session = parse_session_file(&info.path)?;
+        let session = load_codex_session(&info.path, max_blocks)?;
         if let Some(choice) = build_codex_session_choice(info, session, selection_mode) {
             choices.push(choice);
         }
@@ -1033,7 +1045,14 @@ fn resolve_codex_session_selector(
     }
 
     if let Ok(recent) = selector.parse::<usize>() {
-        return resolve_recent_codex_session_selector(sessions, recent);
+        if recent == 0 {
+            anyhow::bail!(
+                "Session selectors are 1-based. Use `--session 1` for the newest session."
+            );
+        }
+        if recent <= sessions.len() && !selector.starts_with('0') {
+            return Ok(sessions[recent - 1].path.clone());
+        }
     }
 
     sessions
@@ -1047,25 +1066,6 @@ fn resolve_codex_session_selector(
         })
 }
 
-fn resolve_recent_codex_session_selector(
-    sessions: &[CodexSessionInfo],
-    recent: usize,
-) -> Result<std::path::PathBuf> {
-    if recent == 0 {
-        anyhow::bail!("Session selectors are 1-based. Use `--session 1` for the newest session.");
-    }
-
-    sessions
-        .get(recent - 1)
-        .map(|session| session.path.clone())
-        .with_context(|| {
-            format!(
-                "Only {} Codex session(s) found. Try a smaller `--session` value or `--pick`.",
-                sessions.len()
-            )
-        })
-}
-
 fn codex_session_matches_selector(session: &CodexSessionInfo, selector: &str) -> bool {
     session
         .id
@@ -1073,7 +1073,7 @@ fn codex_session_matches_selector(session: &CodexSessionInfo, selector: &str) ->
         .is_some_and(|id| id == selector || id.starts_with(selector))
         || session
             .path
-            .file_name()
+            .file_stem()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.contains(selector))
 }
@@ -1099,13 +1099,17 @@ fn resolve_current_codex_session_with_blocks(
         }
     }
 
-    let _ = cwd;
+    if let Some(path) = find_current_session(cwd)? {
+        if codex_session_has_blocks(&path)? {
+            return Ok(Some(path));
+        }
+    }
 
     Ok(None)
 }
 
 fn codex_session_has_blocks(path: &std::path::Path) -> Result<bool> {
-    Ok(!parse_session_file(path)?.blocks.is_empty())
+    Ok(!load_codex_session(path, None)?.blocks.is_empty())
 }
 
 fn pick_codex_session_path(sessions: &[CodexSessionInfo]) -> Result<Option<std::path::PathBuf>> {
@@ -1136,7 +1140,7 @@ fn build_codex_session_pick_entries(sessions: &[CodexSessionInfo]) -> Result<Vec
 }
 
 fn build_codex_session_pick_entry(idx: usize, session: &CodexSessionInfo) -> Result<PickEntry> {
-    let parsed = parse_session_file(&session.path)?;
+    let parsed = load_codex_session(&session.path, None)?;
     let preview = codex_session_preview(&parsed)
         .or_else(|| session.id.clone())
         .unwrap_or_else(|| "<empty Codex session>".to_string());
@@ -1153,6 +1157,20 @@ fn build_codex_session_pick_entry(idx: usize, session: &CodexSessionInfo) -> Res
         full_preview: meta,
         selected: false,
     })
+}
+
+fn load_codex_session(
+    path: &std::path::Path,
+    max_blocks_override: Option<usize>,
+) -> Result<CodexSession> {
+    let config = sivtr_core::config::SivtrConfig::load().unwrap_or_default();
+    let max_blocks = max_blocks_override.unwrap_or(config.codex.max_blocks);
+    let max_blocks = if max_blocks == 0 {
+        None
+    } else {
+        Some(max_blocks)
+    };
+    parse_session_file_with_limit(path, max_blocks)
 }
 
 fn codex_session_preview(session: &CodexSession) -> Option<String> {
@@ -2110,6 +2128,7 @@ mod tests {
             path: "rollout.jsonl".into(),
             id: Some("abc".to_string()),
             cwd: Some("d:\\repo".to_string()),
+            truncated_blocks: 0,
             blocks: vec![
                 CodexBlock {
                     kind: CodexBlockKind::User,
@@ -2188,5 +2207,58 @@ mod tests {
             resolve_codex_session_selector(&sessions, "019df748").unwrap(),
             PathBuf::from("rollout-019df748-161a.jsonl")
         );
+    }
+
+    #[test]
+    fn numeric_out_of_range_selector_can_match_numeric_id_prefix() {
+        let sessions = vec![CodexSessionInfo {
+            path: PathBuf::from("rollout-123abc.jsonl"),
+            id: Some("123abc-session".to_string()),
+            cwd: Some("/".to_string()),
+            modified: SystemTime::UNIX_EPOCH,
+        }];
+
+        assert_eq!(
+            resolve_codex_session_selector(&sessions, "123").unwrap(),
+            PathBuf::from("rollout-123abc.jsonl")
+        );
+    }
+
+    #[test]
+    fn leading_zero_selector_matches_id_prefix_instead_of_recent_index() {
+        let sessions = vec![
+            CodexSessionInfo {
+                path: PathBuf::from("latest.jsonl"),
+                id: Some("999".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+            CodexSessionInfo {
+                path: PathBuf::from("rollout-019df748-161a.jsonl"),
+                id: Some("019df748-161a-7ba2-b767-582f65ea0ac7".to_string()),
+                cwd: Some("/".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            },
+        ];
+
+        assert_eq!(
+            resolve_codex_session_selector(&sessions, "019df748").unwrap(),
+            PathBuf::from("rollout-019df748-161a.jsonl")
+        );
+    }
+
+    #[test]
+    fn session_selector_ignores_jsonl_extension_matches() {
+        let sessions = vec![CodexSessionInfo {
+            path: PathBuf::from("rollout-019df748-161a.jsonl"),
+            id: Some("019df748-161a-7ba2-b767-582f65ea0ac7".to_string()),
+            cwd: Some("/".to_string()),
+            modified: SystemTime::UNIX_EPOCH,
+        }];
+
+        let error = resolve_codex_session_selector(&sessions, "jsonl").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("No Codex session matched `jsonl`"));
     }
 }

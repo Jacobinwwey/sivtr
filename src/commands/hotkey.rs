@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sivtr_core::config::SivtrConfig;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 use crate::cli::{
@@ -53,7 +54,8 @@ pub fn pick_codex(args: &HotkeyPickCodexArgs) -> Result<()> {
     let result = std::panic::catch_unwind(|| {
         copy::execute_codex(CodexCopyRequest {
             selector: None,
-            session_selector: None,
+            session_selector: args.session.as_deref(),
+            max_blocks: None,
             pick: true,
             pick_current_session: true,
             selection_mode: CodexSelectionMode::LastTurn,
@@ -258,6 +260,7 @@ fn read_state() -> Result<Option<HotkeyState>> {
     Ok(Some(state))
 }
 
+#[cfg(windows)]
 fn write_state(state: &HotkeyState) -> Result<()> {
     let path = state_path()?;
     if let Some(parent) = path.parent() {
@@ -349,7 +352,7 @@ fn serve_windows(args: &HotkeyServeArgs) -> Result<()> {
         }
 
         if msg.message == WM_HOTKEY && msg.wParam == hotkey_id as usize {
-            let _ = spawn_picker_terminal(&args.cwd);
+            let _ = spawn_picker_terminal(&args.cwd, std::env::var("CODEX_THREAD_ID").ok());
         }
 
         unsafe {
@@ -440,7 +443,7 @@ fn unregister_hotkey(id: i32) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn spawn_picker_terminal(cwd: &str) -> Result<()> {
+fn spawn_picker_terminal(cwd: &str, session: Option<String>) -> Result<()> {
     use std::os::windows::process::CommandExt;
 
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
@@ -449,14 +452,17 @@ fn spawn_picker_terminal(cwd: &str) -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
     let exe = normalize_windows_path_text(&exe.to_string_lossy());
 
-    Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .current_dir(&cwd)
         .arg("hotkey-pick-codex")
         .arg("--cwd")
         .arg(&cwd)
-        .creation_flags(CREATE_NEW_CONSOLE)
-        .spawn()
-        .context("Failed to open picker terminal")?;
+        .creation_flags(CREATE_NEW_CONSOLE);
+    if let Some(session) = session.filter(|value| !value.trim().is_empty()) {
+        command.arg("--session").arg(session);
+    }
+    command.spawn().context("Failed to open picker terminal")?;
 
     Ok(())
 }

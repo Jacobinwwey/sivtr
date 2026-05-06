@@ -36,7 +36,7 @@ async function pickCodex(): Promise<void> {
 
   const config = vscode.workspace.getConfiguration("sivtr");
   const command = config.get<string>("command", "sivtr").trim();
-  const args = config.get<string[]>("args", ["copy", "codex", "--pick"]);
+  const args = resolveArgs(config, workspaceFolder.uri.fsPath);
   const terminalName = config.get<string>("terminalName", "sivtr");
   const reuseTerminal = config.get<boolean>("reuseTerminal", true);
   const closeTerminalOnSuccess = config.get<boolean>("closeTerminalOnSuccess", true);
@@ -121,6 +121,16 @@ function getTerminal(name: string, cwd: string, reuse: boolean): vscode.Terminal
   });
   sivtrTerminalCwd = cwd;
   return sivtrTerminal;
+}
+
+function resolveArgs(config: vscode.WorkspaceConfiguration, cwd: string): string[] {
+  const configured = config.get<string[]>("args", ["hotkey-pick-codex", "--cwd", "."]);
+  return configured.map((arg, index, args) => {
+    if ((arg === "." || arg === "${workspaceFolder}") && args[index - 1] === "--cwd") {
+      return cwd;
+    }
+    return arg;
+  });
 }
 
 function buildCommandLine(command: string, args: string[]): string {

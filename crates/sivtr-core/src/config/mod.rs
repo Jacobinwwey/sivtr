@@ -16,6 +16,8 @@ pub struct SivtrConfig {
     pub history: HistoryConfig,
     /// Copy command settings.
     pub copy: CopyConfig,
+    /// Codex session settings.
+    pub codex: CodexConfig,
     /// Global hotkey settings.
     pub hotkey: HotkeyConfig,
 }
@@ -79,6 +81,15 @@ impl CopyConfig {
     }
 }
 
+/// Codex session configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodexConfig {
+    /// Maximum number of parsed Codex blocks to keep in memory.
+    /// `0` means unlimited.
+    pub max_blocks: usize,
+}
+
 /// Global hotkey configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -112,6 +123,12 @@ impl Default for HotkeyConfig {
         Self {
             chord: "alt+y".to_string(),
         }
+    }
+}
+
+impl Default for CodexConfig {
+    fn default() -> Self {
+        Self { max_blocks: 10_000 }
     }
 }
 
@@ -218,5 +235,18 @@ mod tests {
 
         assert!(toml.contains("[hotkey]"));
         assert!(toml.contains("chord = \"alt+y\""));
+    }
+
+    #[test]
+    fn serializes_codex_config() {
+        let config = SivtrConfig {
+            codex: CodexConfig { max_blocks: 10_000 },
+            ..SivtrConfig::default()
+        };
+
+        let toml = to_toml_string(&config).unwrap();
+
+        assert!(toml.contains("[codex]"));
+        assert!(toml.contains("max_blocks = 10000"));
     }
 }

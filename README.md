@@ -149,7 +149,7 @@ sivtr copy out --lines 10:40
 
 ### Reuse Codex Sessions
 
-`sivtr copy codex` reads Codex rollout JSONL files from `~/.codex/sessions` and chooses the newest session whose `cwd` matches your current directory by default. Use `--session N` to target the Nth newest recorded session, or `--session ID` to target a specific session id / id prefix.
+`sivtr copy codex` reads Codex rollout JSONL files from `~/.codex/sessions`. When you run it inside an active `codex` or `codex resume` shell, it prefers that exact session id first. Otherwise it chooses the newest session whose `cwd` matches your current directory. Use `--session N` to target the Nth newest recorded session, or `--session ID` to target a specific session id / id prefix.
 
 ```bash
 sivtr copy codex        # latest completed user + assistant turn
@@ -161,9 +161,13 @@ sivtr copy codex in     # latest user message
 sivtr copy codex tool   # latest tool output
 sivtr copy codex all    # parsed session
 sivtr copy codex --session 2 --pick
+sivtr copy codex all --max-blocks 0
+sivtr copy codex all --max-blocks 10000
 ```
 
 Progress commentary is filtered by default, so `sivtr copy codex out` returns the final assistant reply instead of intermediate status updates.
+
+Large Codex transcripts are capped to the latest `10000` parsed blocks by default for robustness. Set `[codex].max_blocks = 0` in config or pass `--max-blocks 0` for a full import.
 
 ### VS Code Shortcut
 

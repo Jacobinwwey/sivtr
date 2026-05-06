@@ -28,6 +28,7 @@ pub struct CodexSession {
     pub id: Option<String>,
     pub cwd: Option<String>,
     pub blocks: Vec<CodexBlock>,
+    pub truncated_blocks: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +131,13 @@ pub fn is_session_modified_today(path: &Path) -> Result<bool> {
 }
 
 pub fn parse_session_file(path: &Path) -> Result<CodexSession> {
+    parse_session_file_with_limit(path, None)
+}
+
+pub fn parse_session_file_with_limit(
+    path: &Path,
+    max_blocks: Option<usize>,
+) -> Result<CodexSession> {
     let file = fs::File::open(path)
         .with_context(|| format!("Failed to read Codex session: {}", path.display()))?;
     let reader = BufReader::new(file);
@@ -138,6 +146,7 @@ pub fn parse_session_file(path: &Path) -> Result<CodexSession> {
         id: None,
         cwd: None,
         blocks: Vec::new(),
+        truncated_blocks: 0,
     };
 
     for (idx, line) in reader.lines().enumerate() {
@@ -160,6 +169,14 @@ pub fn parse_session_file(path: &Path) -> Result<CodexSession> {
             )
         })?;
         apply_event(&mut session, &value);
+    }
+
+    if let Some(limit) = max_blocks.filter(|limit| *limit > 0) {
+        if session.blocks.len() > limit {
+            let dropped = session.blocks.len() - limit;
+            session.blocks.drain(0..dropped);
+            session.truncated_blocks = dropped;
+        }
     }
 
     Ok(session)
@@ -425,7 +442,10 @@ fn format_block_with_heading(block: &CodexBlock) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_blocks, parse_session_file, select_blocks, CodexBlockKind, CodexSelection};
+    use super::{
+        format_blocks, parse_session_file, parse_session_file_with_limit, select_blocks,
+        CodexBlockKind, CodexSelection,
+    };
 
     #[test]
     fn parses_codex_rollout_messages_and_tools() {
@@ -500,5 +520,27 @@ mod tests {
 
         assert_eq!(session.blocks.len(), 2);
         assert_eq!(blocks[0].text, "real answer");
+    }
+
+    #[test]
+    fn keeps_latest_blocks_when_limit_is_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"session_meta","payload":{"id":"abc"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"first"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"second"}]}}
+{"type":"response_item","payload":{"type":"function_call_output","output":"third"}}
+"#,
+        )
+        .unwrap();
+
+        let session = parse_session_file_with_limit(&path, Some(2)).unwrap();
+
+        assert_eq!(session.truncated_blocks, 1);
+        assert_eq!(session.blocks.len(), 2);
+        assert_eq!(session.blocks[0].text, "second");
+        assert_eq!(session.blocks[1].text, "third");
     }
 }
