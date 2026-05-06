@@ -486,10 +486,13 @@ fn detect_linux_terminal() -> Option<String> {
 }
 
 fn command_exists(name: &str) -> bool {
-    Command::new("which")
-        .arg(name)
-        .output()
-        .map(|output| output.status.success())
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|dir| {
+                let candidate = dir.join(name);
+                candidate.is_file()
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -558,9 +561,10 @@ fn find_marked_block(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_terminal_launch_command, render_linux_shortcut_script, shell_single_quote,
-        update_existing_hook, BASH_HOOK, BASH_SPEC, LEGACY_POWERSHELL_HOOK, NUSHELL_HOOK,
-        NUSHELL_SPEC, POWERSHELL_HOOK, POWERSHELL_SPEC, TMUX_HOOK, TMUX_SPEC, ZSH_HOOK, ZSH_SPEC,
+        build_terminal_launch_command, command_exists, render_linux_shortcut_script,
+        shell_single_quote, update_existing_hook, BASH_HOOK, BASH_SPEC, LEGACY_POWERSHELL_HOOK,
+        NUSHELL_HOOK, NUSHELL_SPEC, POWERSHELL_HOOK, POWERSHELL_SPEC, TMUX_HOOK, TMUX_SPEC,
+        ZSH_HOOK, ZSH_SPEC,
     };
     use std::path::Path;
 
@@ -649,6 +653,11 @@ mod tests {
 
         assert!(script.contains("export PROJECT_CWD='/tmp/project'"));
         assert!(script.contains("sivtr hotkey-pick-codex --cwd \"$PROJECT_CWD\""));
+    }
+
+    #[test]
+    fn command_exists_detects_programs_via_path_scan() {
+        assert!(command_exists("sh"));
     }
 
     #[cfg(windows)]

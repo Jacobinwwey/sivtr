@@ -1888,12 +1888,14 @@ mod tests {
     use super::{
         build_codex_vim_view, build_output_preview, codex_session_preview, filter_lines_by_regex,
         filter_lines_by_spec, finish_copy_with, format_block, is_vim_command,
-        resolve_codex_session_selector, vim_single_quote, CodexBlock, CodexBlockKind, CodexSession,
-        CodexSessionInfo, CommandBlock, CommandSelection, CopyMode, TextPair,
+        resolve_codex_session_selector, resolve_current_codex_session_with_blocks,
+        vim_single_quote, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo, CommandBlock,
+        CommandSelection, CopyMode, TextPair,
     };
     use anyhow::anyhow;
+    use std::env;
     use std::path::PathBuf;
-    use std::time::SystemTime;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn formats_modes() {
@@ -2298,5 +2300,68 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn current_pick_session_prefers_codex_thread_id_over_cwd_match() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp = env::temp_dir().join(format!("sivtr-thread-preference-{nonce}"));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let codex_home = temp.join(".codex");
+        let sessions_dir = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("06");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        let cwd_match = temp.join("cwd-match");
+        let thread_match = temp.join("thread-match");
+        std::fs::create_dir_all(&cwd_match).unwrap();
+        std::fs::create_dir_all(&thread_match).unwrap();
+
+        let cwd_session = sessions_dir.join("rollout-cwd.jsonl");
+        std::fs::write(
+            &cwd_session,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"cwd-session\",\"cwd\":\"{}\"}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"text\":\"cwd user\"}}]}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"text\":\"cwd answer\"}}]}}}}\n",
+                cwd_match.display()
+            ),
+        )
+        .unwrap();
+
+        let thread_session = sessions_dir.join("rollout-thread.jsonl");
+        std::fs::write(
+            &thread_session,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"thread-session\",\"cwd\":\"{}\"}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"text\":\"thread user\"}}]}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"text\":\"thread answer\"}}]}}}}\n",
+                thread_match.display()
+            ),
+        )
+        .unwrap();
+
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        let previous_thread_id = env::var_os("CODEX_THREAD_ID");
+        env::set_var("CODEX_HOME", &codex_home);
+        env::set_var("CODEX_THREAD_ID", "thread-session");
+
+        let resolved = resolve_current_codex_session_with_blocks(&cwd_match).unwrap();
+
+        match previous_codex_home {
+            Some(value) => env::set_var("CODEX_HOME", value),
+            None => env::remove_var("CODEX_HOME"),
+        }
+        match previous_thread_id {
+            Some(value) => env::set_var("CODEX_THREAD_ID", value),
+            None => env::remove_var("CODEX_THREAD_ID"),
+        }
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert_eq!(resolved, Some(thread_session));
     }
 }
