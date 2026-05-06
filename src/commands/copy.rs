@@ -992,16 +992,23 @@ fn parse_line_number(value: &str) -> Result<usize> {
 }
 
 fn finish_copy(text: String, print_full: bool, success_message: String) -> Result<()> {
+    finish_copy_with(text, print_full, success_message, try_copy_to_clipboard)
+}
+
+fn finish_copy_with<F>(
+    text: String,
+    print_full: bool,
+    success_message: String,
+    copy_to_clipboard: F,
+) -> Result<()>
+where
+    F: FnOnce(&str) -> Result<()>,
+{
     if text.is_empty() {
         eprintln!("sivtr: filters removed everything");
         eprintln!("  hint: loosen `--regex` or `--lines`, or copy without filters");
         return Ok(());
     }
-
-    arboard::Clipboard::new()
-        .context("Failed to open clipboard")?
-        .set_text(&text)
-        .context("Failed to set clipboard")?;
 
     if print_full {
         for line in text.lines() {
@@ -1009,7 +1016,25 @@ fn finish_copy(text: String, print_full: bool, success_message: String) -> Resul
         }
     }
 
-    eprintln!("{success_message}");
+    match copy_to_clipboard(&text) {
+        Ok(()) => {
+            eprintln!("{success_message}");
+            Ok(())
+        }
+        Err(error) if print_full => {
+            eprintln!("sivtr: clipboard unavailable; printed text only");
+            eprintln!("  cause: {error:#}");
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn try_copy_to_clipboard(text: &str) -> Result<()> {
+    arboard::Clipboard::new()
+        .context("Failed to open clipboard")?
+        .set_text(text)
+        .context("Failed to set clipboard")?;
     Ok(())
 }
 
@@ -1862,10 +1887,11 @@ mod tests {
     use super::picker::{apply_range_toggle, selection_from_entries, PickEntry};
     use super::{
         build_codex_vim_view, build_output_preview, codex_session_preview, filter_lines_by_regex,
-        filter_lines_by_spec, format_block, is_vim_command, resolve_codex_session_selector,
-        vim_single_quote, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo, CommandBlock,
-        CommandSelection, CopyMode, TextPair,
+        filter_lines_by_spec, finish_copy_with, format_block, is_vim_command,
+        resolve_codex_session_selector, vim_single_quote, CodexBlock, CodexBlockKind, CodexSession,
+        CodexSessionInfo, CommandBlock, CommandSelection, CopyMode, TextPair,
     };
+    use anyhow::anyhow;
     use std::path::PathBuf;
     use std::time::SystemTime;
 
@@ -2260,5 +2286,17 @@ mod tests {
         assert!(error
             .to_string()
             .contains("No Codex session matched `jsonl`"));
+    }
+
+    #[test]
+    fn finish_copy_allows_print_mode_without_clipboard() {
+        let result = finish_copy_with(
+            "hello\nworld".to_string(),
+            true,
+            "sivtr: copied text".to_string(),
+            |_| Err(anyhow!("clipboard unavailable")),
+        );
+
+        assert!(result.is_ok());
     }
 }

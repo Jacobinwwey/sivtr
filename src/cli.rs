@@ -183,7 +183,7 @@ pub enum Commands {
         /// The command to run
         command: String,
         /// Arguments to pass to the command
-        #[arg(trailing_var_arg = true)]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
 
@@ -669,6 +669,19 @@ mod tests {
                 assert_eq!(args.session.as_deref(), Some("019df7fb"));
             }
             _ => panic!("expected hotkey-pick-codex command"),
+        }
+    }
+
+    #[test]
+    fn run_accepts_hyphenated_args() {
+        let cli = Cli::try_parse_from(["sivtr", "run", "bash", "-lc", "printf ok"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Run { command, args }) => {
+                assert_eq!(command, "bash");
+                assert_eq!(args, vec!["-lc", "printf ok"]);
+            }
+            _ => panic!("expected run command"),
         }
     }
 }
