@@ -3,7 +3,7 @@ use sivtr_core::buffer::Buffer;
 use sivtr_core::capture::subprocess;
 use sivtr_core::config::{OpenMode, SivtrConfig};
 use sivtr_core::export::editor;
-use sivtr_core::history::CaptureSource;
+use sivtr_core::history::store::CaptureSource;
 use sivtr_core::parse;
 
 use super::{browse, capture_history};
@@ -15,6 +15,11 @@ pub fn execute(command: &str, args: &[String]) -> Result<()> {
     eprintln!("sivtr: running `{command_line}`");
 
     let result = subprocess::run_and_capture(command, args)?;
+    let invoked_command = if args.is_empty() {
+        command.to_string()
+    } else {
+        format!("{command} {}", args.join(" "))
+    };
 
     match result.exit_code {
         Some(0) => eprintln!("sivtr: command exited successfully"),

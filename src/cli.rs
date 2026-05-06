@@ -673,13 +673,13 @@ mod tests {
     }
 
     #[test]
-    fn run_accepts_hyphen_prefixed_child_args_without_separator() {
+    fn run_accepts_hyphenated_args() {
         let cli = Cli::try_parse_from(["sivtr", "run", "bash", "-lc", "printf ok"]).unwrap();
 
         match cli.command {
             Some(Commands::Run { command, args }) => {
                 assert_eq!(command, "bash");
-                assert_eq!(args, vec!["-lc".to_string(), "printf ok".to_string()]);
+                assert_eq!(args, vec!["-lc", "printf ok"]);
             }
             _ => panic!("expected run command"),
         }

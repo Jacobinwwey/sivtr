@@ -3,7 +3,7 @@ use sivtr_core::buffer::Buffer;
 use sivtr_core::capture::pipe::read_stdin;
 use sivtr_core::config::{OpenMode, SivtrConfig};
 use sivtr_core::export::editor;
-use sivtr_core::history::CaptureSource;
+use sivtr_core::history::store::CaptureSource;
 use sivtr_core::parse;
 
 use super::{browse, capture_history};
