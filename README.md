@@ -185,6 +185,42 @@ Alt+Y
 
 You can rebind it to `Ctrl+Y`, but that usually overrides the editor Redo shortcut.
 
+On Linux, this VS Code shortcut works as the default picker shortcut when the
+editor has focus. The extension runs:
+
+```bash
+sivtr hotkey-pick-codex --cwd .
+```
+
+and `sivtr` prefers the active `codex` / `codex resume` session when one is
+available.
+
+### Linux Shortcut Setup
+
+Linux does not currently ship a default global `sivtr` hotkey outside VS Code.
+
+Reasons:
+
+- Wayland does not provide a universal cross-desktop global hotkey API for
+  ordinary CLI apps.
+- X11-only approaches are legacy and do not cover common Wayland desktops.
+- Opening the picker also needs an interactive terminal, and Linux does not
+  have one portable terminal-launch command that works across GNOME, KDE,
+  Sway, headless SSH, and tmux-based Codex setups.
+
+Recommended Linux setups:
+
+- VS Code: use the built-in `Alt+Y` command binding.
+- tmux: bind a key to the current pane's working directory:
+
+```tmux
+bind-key y new-window -c "#{pane_current_path}" "sivtr hotkey-pick-codex --cwd '#{pane_current_path}'"
+```
+
+- Terminal / desktop environment: create a custom shortcut that launches
+  `sivtr hotkey-pick-codex --cwd <project-path>` in a terminal for the project
+  you want to inspect.
+
 ### Windows Global Hotkey
 
 On Windows, the hotkey daemon can open the Codex picker from anywhere:
