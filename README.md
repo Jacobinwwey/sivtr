@@ -211,15 +211,42 @@ Reasons:
 Recommended Linux setups:
 
 - VS Code: use the built-in `Alt+Y` command binding.
-- tmux: bind a key to the current pane's working directory:
+- tmux: install a helper that binds `prefix + y` to the current pane's working
+  directory:
+
+```bash
+sivtr init tmux
+tmux source-file ~/.tmux.conf
+```
+
+The generated block is:
 
 ```tmux
 bind-key y new-window -c "#{pane_current_path}" "sivtr hotkey-pick-codex --cwd '#{pane_current_path}'"
 ```
 
-- Terminal / desktop environment: create a custom shortcut that launches
-  `sivtr hotkey-pick-codex --cwd <project-path>` in a terminal for the project
-  you want to inspect.
+- Terminal / desktop environment: generate a launcher for the current project:
+
+```bash
+sivtr init linux-shortcut
+```
+
+This writes:
+
+- `~/.local/bin/sivtr-pick-codex`
+- `~/.local/share/applications/sivtr-pick-codex.desktop`
+
+The launcher opens a terminal and runs:
+
+```bash
+sivtr hotkey-pick-codex --cwd "<project-path>"
+```
+
+Typical Linux usage examples:
+
+- GNOME / KDE: bind your desktop shortcut to `~/.local/bin/sivtr-pick-codex`.
+- Plain terminal launcher: run `~/.local/bin/sivtr-pick-codex`.
+- Manual one-off command: `sivtr hotkey-pick-codex --cwd /path/to/project`.
 
 ### Windows Global Hotkey
 
@@ -244,7 +271,7 @@ The default shortcut is `alt+y`.
 | `sivtr diff <left> <right>` | Compare recent command blocks. |
 | `sivtr history` | List, search, and show captured output history. |
 | `sivtr config` | Manage the TOML config file. |
-| `sivtr init <shell>` | Generate shell integration for command-block capture. |
+| `sivtr init <target>` | Generate shell integration or Linux shortcut helpers. |
 | `sivtr import` | Open the current session log. |
 | `sivtr hotkey` | Manage the Windows Codex picker hotkey. |
 | `sivtr clear` | Clear session logs. |
