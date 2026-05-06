@@ -26,6 +26,11 @@ If the terminal was opened from a live `codex resume` session, `sivtr` prefers
 that exact session id first. Otherwise it falls back to the newest non-empty
 session whose `cwd` matches the workspace.
 
+On Linux, this VS Code keybinding is the recommended default shortcut. `sivtr`
+does not currently provide a desktop-wide global hotkey on Linux outside VS
+Code because global shortcut registration and terminal launching are not
+portable across Wayland, X11, and terminal-only environments.
+
 ## Settings
 
 | Setting | Default | Purpose |

@@ -185,6 +185,39 @@ Alt+Y
 
 你可以改成 `Ctrl+Y`，但它通常会覆盖编辑器的 Redo。
 
+在 Linux 上，当焦点位于 VS Code 编辑器时，这个快捷键就是默认的
+Codex picker 快捷键。插件实际执行的是：
+
+```bash
+sivtr hotkey-pick-codex --cwd .
+```
+
+如果当前终端正运行在活动中的 `codex` 或 `codex resume` 会话里，
+`sivtr` 会优先使用这个精确会话。
+
+### Linux 快捷键设置
+
+Linux 目前没有提供 VS Code 之外的默认全局 `sivtr` 热键。
+
+原因：
+
+- Wayland 不给普通 CLI 工具提供统一的跨桌面全局热键接口。
+- 只做 X11 方案已经不够，因为很多 Linux 桌面环境默认是 Wayland。
+- 打开 picker 还需要一个交互式终端，而 GNOME、KDE、Sway、纯 SSH、
+  tmux 等环境并没有统一可移植的终端启动命令。
+
+推荐的 Linux 设置方式：
+
+- VS Code：直接使用内置的 `Alt+Y`。
+- tmux：给当前 pane 目录绑定一个快捷键：
+
+```tmux
+bind-key y new-window -c "#{pane_current_path}" "sivtr hotkey-pick-codex --cwd '#{pane_current_path}'"
+```
+
+- 终端或桌面环境：手动创建一个自定义快捷键，在终端中执行
+  `sivtr hotkey-pick-codex --cwd <project-path>`。
+
 ### Windows 全局热键
 
 Windows 上可以启动全局热键守护进程：
