@@ -135,6 +135,7 @@ fn run_codex_copy_args(args: &CodexCopyArgs, selection_mode: CodexSelectionMode)
     commands::copy::execute_codex(CodexCopyRequest {
         selector: args.common.selector.as_deref(),
         session_selector: args.session.as_deref(),
+        max_blocks: args.max_blocks,
         pick: args.common.pick,
         pick_current_session: false,
         selection_mode,

@@ -36,6 +36,9 @@ max_entries = 0
 [copy]
 prompts = []
 
+[codex]
+max_blocks = 10000
+
 [hotkey]
 chord = "alt+y"
 ```
@@ -62,3 +65,14 @@ prompts = ["dev>", "repo $", "PS C:\\repo>"]
 ```
 
 这有助于命令块解析识别会话日志里的命令输入行。
+
+## Codex 会话上限
+
+可以在 Codex 配置段里限制超大会话导入和 picker 的解析规模：
+
+```toml
+[codex]
+max_blocks = 10000
+```
+
+`max_blocks = 0` 表示不限制，保留完整解析后的 transcript。

@@ -36,6 +36,9 @@ max_entries = 0
 [copy]
 prompts = []
 
+[codex]
+max_blocks = 10000
+
 [hotkey]
 chord = "alt+y"
 ```
@@ -62,3 +65,14 @@ prompts = ["dev>", "repo $", "PS C:\\repo>"]
 ```
 
 This helps command-block parsing identify the command input lines in session logs.
+
+## Codex session limits
+
+Use the Codex section to bound very large session imports and pickers:
+
+```toml
+[codex]
+max_blocks = 10000
+```
+
+`max_blocks = 0` disables the limit and keeps the full parsed transcript.

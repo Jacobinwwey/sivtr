@@ -3,7 +3,7 @@ title: Codex 捕获
 description: 从当前 Codex 会话复制有用块。
 ---
 
-`sivtr copy codex` 会读取 `~/.codex/sessions` 下的 Codex rollout JSONL 文件。默认选择 `cwd` 与当前工作目录匹配的最新会话。
+`sivtr copy codex` 会读取 `~/.codex/sessions` 下的 Codex rollout JSONL 文件。在活动中的 `codex` 或 `codex resume` shell 里，它会优先使用当前精确会话 id；否则默认选择 `cwd` 与当前工作目录匹配的最新会话。
 
 当你想复用最后一个回答、输入、工具输出，或整个解析后的会话，但不想手动打开 Codex transcript 时，这个功能很有用。
 
@@ -14,9 +14,11 @@ sivtr copy codex --session 2
 sivtr copy codex --session 019df7fb
 sivtr copy codex out --session 2 --print
 sivtr copy codex --session 2 --pick
+sivtr copy codex all --max-blocks 0
+sivtr copy codex all --max-blocks 10000
 ```
 
-`--session N` 表示第 N 个最近的会话；`--session ID` 按 session id 或其前缀匹配。
+`--session N` 表示第 N 个最近的会话；`--session ID` 按 session id 或其前缀匹配。`--max-blocks N` 只保留最近 `N` 个解析后的 block；`--max-blocks 0` 则做全量导入。
 
 ## 默认行为
 
@@ -77,7 +79,7 @@ sivtr copy codex out --pick
 
 普通 CLI 选择器会先显示会话列表，进入某个会话后再选择一个或多个单元。按 `t` 打开 Vim 风格视图。在 Codex 视图里，如果存在替代完整视图，`T` 可以切换工具内容。
 
-Windows 热键和 VS Code 插件这类带上下文的入口会先打开当前 workspace 下最新的非空会话。如果这个会话不存在或为空，再退回到会话列表。
+Windows 热键和 VS Code 插件这类带上下文的入口，如果能拿到当前 live Codex thread id，会先直接打开这个精确会话；否则会先打开当前 workspace 下最新的非空会话。如果这个会话不存在或为空，再退回到会话列表。
 
 ## Windows 热键
 
