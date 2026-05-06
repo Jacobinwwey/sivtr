@@ -209,14 +209,41 @@ Linux 目前没有提供 VS Code 之外的默认全局 `sivtr` 热键。
 推荐的 Linux 设置方式：
 
 - VS Code：直接使用内置的 `Alt+Y`。
-- tmux：给当前 pane 目录绑定一个快捷键：
+- tmux：安装一个把 `prefix + y` 绑定到当前 pane 目录的 helper：
+
+```bash
+sivtr init tmux
+tmux source-file ~/.tmux.conf
+```
+
+生成的配置块是：
 
 ```tmux
 bind-key y new-window -c "#{pane_current_path}" "sivtr hotkey-pick-codex --cwd '#{pane_current_path}'"
 ```
 
-- 终端或桌面环境：手动创建一个自定义快捷键，在终端中执行
-  `sivtr hotkey-pick-codex --cwd <project-path>`。
+- 终端或桌面环境：为当前项目生成一个 launcher：
+
+```bash
+sivtr init linux-shortcut
+```
+
+它会写入：
+
+- `~/.local/bin/sivtr-pick-codex`
+- `~/.local/share/applications/sivtr-pick-codex.desktop`
+
+这个 launcher 会打开一个终端，并执行：
+
+```bash
+sivtr hotkey-pick-codex --cwd "<project-path>"
+```
+
+常见 Linux 使用示例：
+
+- GNOME / KDE：把 `~/.local/bin/sivtr-pick-codex` 绑定到你的桌面快捷键。
+- 纯终端启动：直接运行 `~/.local/bin/sivtr-pick-codex`。
+- 一次性手动执行：`sivtr hotkey-pick-codex --cwd /path/to/project`。
 
 ### Windows 全局热键
 
@@ -241,7 +268,7 @@ sivtr hotkey stop
 | `sivtr diff <left> <right>` | 对比最近命令输出。 |
 | `sivtr history` | 列出、搜索、查看输出历史。 |
 | `sivtr config` | 管理 TOML 配置。 |
-| `sivtr init <shell>` | 生成命令块捕获所需的 shell 集成。 |
+| `sivtr init <target>` | 生成 shell 集成或 Linux 快捷键 helper。 |
 | `sivtr import` | 打开当前 session log。 |
 | `sivtr hotkey` | 管理 Windows Codex picker 热键。 |
 | `sivtr clear` | 清空 session logs。 |
