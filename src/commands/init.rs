@@ -537,7 +537,7 @@ fn build_terminal_launch_command(terminal: &str) -> String {
 fn write_linux_shortcut_desktop_entry(path: &Path, script_path: &Path) -> Result<()> {
     let desktop = format!(
         "[Desktop Entry]\nType=Application\nName=Sivtr Pick Codex\nExec={}\nTerminal=false\nCategories=Development;\n",
-        script_path.display()
+        desktop_exec_quote(&script_path.to_string_lossy())
     );
     fs::write(path, desktop)?;
     Ok(())
@@ -545,6 +545,10 @@ fn write_linux_shortcut_desktop_entry(path: &Path, script_path: &Path) -> Result
 
 fn shell_single_quote(value: &str) -> String {
     value.replace('\'', "'\"'\"'")
+}
+
+fn desktop_exec_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn find_marked_block(
@@ -561,10 +565,10 @@ fn find_marked_block(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_terminal_launch_command, command_exists, render_linux_shortcut_script,
-        shell_single_quote, update_existing_hook, BASH_HOOK, BASH_SPEC, LEGACY_POWERSHELL_HOOK,
-        NUSHELL_HOOK, NUSHELL_SPEC, POWERSHELL_HOOK, POWERSHELL_SPEC, TMUX_HOOK, TMUX_SPEC,
-        ZSH_HOOK, ZSH_SPEC,
+        build_terminal_launch_command, command_exists, desktop_exec_quote,
+        render_linux_shortcut_script, shell_single_quote, update_existing_hook, BASH_HOOK,
+        BASH_SPEC, LEGACY_POWERSHELL_HOOK, NUSHELL_HOOK, NUSHELL_SPEC, POWERSHELL_HOOK,
+        POWERSHELL_SPEC, TMUX_HOOK, TMUX_SPEC, ZSH_HOOK, ZSH_SPEC,
     };
     use std::path::Path;
 
@@ -653,6 +657,22 @@ mod tests {
 
         assert!(script.contains("export PROJECT_CWD='/tmp/project'"));
         assert!(script.contains("sivtr hotkey-pick-codex --cwd \"$PROJECT_CWD\""));
+    }
+
+    #[test]
+    fn desktop_exec_quote_wraps_paths_with_spaces() {
+        assert_eq!(
+            desktop_exec_quote("/tmp/sivtr desktop/sivtr-pick-codex"),
+            "\"/tmp/sivtr desktop/sivtr-pick-codex\""
+        );
+    }
+
+    #[test]
+    fn desktop_exec_quote_escapes_embedded_quotes_and_backslashes() {
+        assert_eq!(
+            desktop_exec_quote("/tmp/dir \\\"quoted\\\"/sivtr"),
+            "\"/tmp/dir \\\\\\\"quoted\\\\\\\"/sivtr\""
+        );
     }
 
     #[test]

@@ -85,6 +85,10 @@ pub fn find_session_by_id(id: &str) -> Result<Option<PathBuf>> {
 }
 
 pub fn find_current_session(cwd: &Path) -> Result<Option<PathBuf>> {
+    if let Some(path) = find_current_thread_session()? {
+        return Ok(Some(path));
+    }
+
     if let Some(session) = list_recent_sessions(Some(cwd))?.into_iter().next() {
         return Ok(Some(session.path));
     }
@@ -93,6 +97,19 @@ pub fn find_current_session(cwd: &Path) -> Result<Option<PathBuf>> {
         .into_iter()
         .next()
         .map(|session| session.path))
+}
+
+fn find_current_thread_session() -> Result<Option<PathBuf>> {
+    let Ok(thread_id) = std::env::var("CODEX_THREAD_ID") else {
+        return Ok(None);
+    };
+
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return Ok(None);
+    }
+
+    find_session_by_id(thread_id)
 }
 
 pub fn list_recent_sessions(cwd: Option<&Path>) -> Result<Vec<CodexSessionInfo>> {
@@ -443,9 +460,10 @@ fn format_block_with_heading(block: &CodexBlock) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_blocks, parse_session_file, parse_session_file_with_limit, select_blocks,
-        CodexBlockKind, CodexSelection,
+        find_current_session, format_blocks, parse_session_file, parse_session_file_with_limit,
+        select_blocks, CodexBlockKind, CodexSelection,
     };
+    use std::{env, time::Duration};
 
     #[test]
     fn parses_codex_rollout_messages_and_tools() {
@@ -542,5 +560,57 @@ mod tests {
         assert_eq!(session.blocks.len(), 2);
         assert_eq!(session.blocks[0].text, "second");
         assert_eq!(session.blocks[1].text, "third");
+    }
+
+    #[test]
+    fn find_current_session_prefers_codex_thread_id_over_cwd_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("codex-home");
+        let sessions_dir = codex_home.join("sessions").join("2026").join("05").join("07");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        let cwd_match = temp.path().join("cwd-match");
+        let thread_match = temp.path().join("thread-match");
+        std::fs::create_dir_all(&cwd_match).unwrap();
+        std::fs::create_dir_all(&thread_match).unwrap();
+
+        let cwd_session = sessions_dir.join("rollout-cwd.jsonl");
+        std::fs::write(
+            &cwd_session,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"cwd-session\",\"cwd\":\"{}\"}}}}\n",
+                cwd_match.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+
+        let thread_session = sessions_dir.join("rollout-thread.jsonl");
+        std::fs::write(
+            &thread_session,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"thread-session\",\"cwd\":\"{}\"}}}}\n",
+                thread_match.display()
+            ),
+        )
+        .unwrap();
+
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        let previous_thread_id = env::var_os("CODEX_THREAD_ID");
+        env::set_var("CODEX_HOME", &codex_home);
+        env::set_var("CODEX_THREAD_ID", "thread-session");
+
+        let resolved = find_current_session(&cwd_match).unwrap();
+
+        match previous_codex_home {
+            Some(value) => env::set_var("CODEX_HOME", value),
+            None => env::remove_var("CODEX_HOME"),
+        }
+        match previous_thread_id {
+            Some(value) => env::set_var("CODEX_THREAD_ID", value),
+            None => env::remove_var("CODEX_THREAD_ID"),
+        }
+
+        assert_eq!(resolved, Some(thread_session));
     }
 }
