@@ -129,8 +129,11 @@ if (($env.SIVTR_PROMPT_WRAPPED? | default false) != true) {
 # <<< sivtr shell integration <<<
 "#;
 
+#[cfg_attr(not(unix), allow(dead_code))]
 const TMUX_MARKER_START: &str = "# >>> sivtr tmux shortcut >>>";
+#[cfg_attr(not(unix), allow(dead_code))]
 const TMUX_MARKER_END: &str = "# <<< sivtr tmux shortcut <<<";
+#[cfg_attr(not(unix), allow(dead_code))]
 const TMUX_HOOK: &str = r##"# >>> sivtr tmux shortcut >>>
 bind-key y new-window -c "#{pane_current_path}" "sivtr hotkey-pick-codex --cwd '#{pane_current_path}'"
 # <<< sivtr tmux shortcut <<<
@@ -172,6 +175,7 @@ const NUSHELL_SPEC: HookSpec = HookSpec {
     legacy_hook: None,
 };
 
+#[cfg_attr(not(unix), allow(dead_code))]
 const TMUX_SPEC: HookSpec = HookSpec {
     hook: TMUX_HOOK,
     marker_start: TMUX_MARKER_START,
@@ -250,12 +254,8 @@ fn install_single_shell_hook(profile_path: &Path, spec: &HookSpec) -> Result<()>
     Ok(())
 }
 
+#[cfg(unix)]
 fn install_tmux_shortcut() -> Result<()> {
-    #[cfg(not(unix))]
-    {
-        anyhow::bail!("`sivtr init tmux` is only supported on Unix-like systems");
-    }
-
     let path = tmux_config_path()?;
     match install_into_profile(&path, &TMUX_SPEC)? {
         InstallStatus::Installed => {
@@ -279,12 +279,15 @@ fn install_tmux_shortcut() -> Result<()> {
     Ok(())
 }
 
-fn install_linux_shortcut() -> Result<()> {
-    #[cfg(not(unix))]
-    {
-        anyhow::bail!("`sivtr init linux-shortcut` is only supported on Unix-like systems");
-    }
+#[cfg(not(unix))]
+fn install_tmux_shortcut() -> Result<()> {
+    Err(anyhow::anyhow!(
+        "`sivtr init tmux` is only supported on Unix-like systems"
+    ))
+}
 
+#[cfg(unix)]
+fn install_linux_shortcut() -> Result<()> {
     let home = dirs::home_dir().context("Failed to resolve home directory")?;
     let bin_dir = home.join(".local").join("bin");
     let applications_dir = home.join(".local").join("share").join("applications");
@@ -311,6 +314,13 @@ fn install_linux_shortcut() -> Result<()> {
     }
     eprintln!("  bind your desktop shortcut to: {}", script_path.display());
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn install_linux_shortcut() -> Result<()> {
+    Err(anyhow::anyhow!(
+        "`sivtr init linux-shortcut` is only supported on Unix-like systems"
+    ))
 }
 
 fn print_install_summary(installed: &[String], updated: &[String]) {
@@ -406,6 +416,7 @@ fn nushell_config_path() -> Result<PathBuf> {
     Ok(config_dir.join("nushell").join("config.nu"))
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn tmux_config_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Failed to resolve home directory")?;
     Ok(home.join(".tmux.conf"))
@@ -467,6 +478,7 @@ fn update_existing_hook(content: &str, spec: &HookSpec) -> Option<String> {
     None
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn detect_linux_terminal() -> Option<String> {
     for candidate in [
         "x-terminal-emulator",
@@ -485,6 +497,7 @@ fn detect_linux_terminal() -> Option<String> {
     None
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn command_exists(name: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| {
@@ -496,6 +509,7 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn write_linux_shortcut_script(path: &Path, cwd: &Path, terminal: Option<&str>) -> Result<()> {
     let script = render_linux_shortcut_script(cwd, terminal);
     fs::write(path, script)?;
@@ -508,6 +522,7 @@ fn write_linux_shortcut_script(path: &Path, cwd: &Path, terminal: Option<&str>) 
     Ok(())
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_linux_shortcut_script(cwd: &Path, terminal: Option<&str>) -> String {
     let cwd = shell_single_quote(&cwd.to_string_lossy());
     let launcher = terminal
@@ -520,6 +535,7 @@ fn render_linux_shortcut_script(cwd: &Path, terminal: Option<&str>) -> String {
     format!("#!/usr/bin/env bash\nset -euo pipefail\nexport PROJECT_CWD='{cwd}'\n{launcher}\n")
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn build_terminal_launch_command(terminal: &str) -> String {
     let picker = "sivtr hotkey-pick-codex --cwd \"$PROJECT_CWD\"";
     match terminal {
@@ -534,6 +550,7 @@ fn build_terminal_launch_command(terminal: &str) -> String {
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn write_linux_shortcut_desktop_entry(path: &Path, script_path: &Path) -> Result<()> {
     let desktop = format!(
         "[Desktop Entry]\nType=Application\nName=Sivtr Pick Codex\nExec={}\nTerminal=false\nCategories=Development;\n",
@@ -543,10 +560,12 @@ fn write_linux_shortcut_desktop_entry(path: &Path, script_path: &Path) -> Result
     Ok(())
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn shell_single_quote(value: &str) -> String {
     value.replace('\'', "'\"'\"'")
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn desktop_exec_quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
