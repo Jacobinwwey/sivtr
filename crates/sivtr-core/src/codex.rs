@@ -566,7 +566,11 @@ mod tests {
     fn find_current_session_prefers_codex_thread_id_over_cwd_match() {
         let temp = tempfile::tempdir().unwrap();
         let codex_home = temp.path().join("codex-home");
-        let sessions_dir = codex_home.join("sessions").join("2026").join("05").join("07");
+        let sessions_dir = codex_home
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("07");
         std::fs::create_dir_all(&sessions_dir).unwrap();
 
         let cwd_match = temp.path().join("cwd-match");
