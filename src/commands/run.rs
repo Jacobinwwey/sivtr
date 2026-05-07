@@ -15,12 +15,6 @@ pub fn execute(command: &str, args: &[String]) -> Result<()> {
     eprintln!("sivtr: running `{command_line}`");
 
     let result = subprocess::run_and_capture(command, args)?;
-    let invoked_command = if args.is_empty() {
-        command.to_string()
-    } else {
-        format!("{command} {}", args.join(" "))
-    };
-
     match result.exit_code {
         Some(0) => eprintln!("sivtr: command exited successfully"),
         Some(code) => eprintln!("sivtr: command exited with code {code}"),
