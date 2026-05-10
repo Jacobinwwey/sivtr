@@ -522,6 +522,17 @@ fn run_codex_hierarchy_picker_on_terminal(
                     let select_all = selected_dialogues.iter().any(|selected| !selected);
                     selected_dialogues.fill(select_all);
                 }
+                KeyCode::Char('t')
+                    if matches!(
+                        focus,
+                        CodexHierarchyFocus::Dialogues | CodexHierarchyFocus::Content
+                    ) && dialogue_count > 0 =>
+                {
+                    let view = codex_dialogue_vim_view(&choices[session_idx], dialogue_idx);
+                    restore_tui(terminal)?;
+                    open_vim_view(&view)?;
+                    *terminal = init_tui()?;
+                }
                 KeyCode::Enter => match focus {
                     CodexHierarchyFocus::Sessions => {
                         if dialogue_count > 0 {
@@ -588,6 +599,27 @@ fn current_dialogue_text(choice: &CodexSessionChoice, dialogue_idx: usize) -> &s
         .unwrap_or("<empty>")
 }
 
+fn codex_dialogue_vim_view(choice: &CodexSessionChoice, dialogue_idx: usize) -> VimView {
+    let text = current_dialogue_text(choice, dialogue_idx).to_string();
+    let end = line_count(&text).max(1);
+    VimView {
+        raw: text.clone(),
+        blocks: vec![VimBlock {
+            start: 1,
+            end,
+            input_start: 1,
+            input_end: end,
+            output_start: 1,
+            output_end: end,
+            block_text: text.clone(),
+            input_text: text.clone(),
+            output_text: text.clone(),
+            command_text: String::new(),
+        }],
+        alternate: None,
+    }
+}
+
 fn render_codex_hierarchy_picker(
     frame: &mut Frame,
     choices: &[CodexSessionChoice],
@@ -608,10 +640,10 @@ fn render_codex_hierarchy_picker(
     let controls = match focus {
         CodexHierarchyFocus::Sessions => "j/k move  l/Right/Enter open dialogues  q/Esc cancel",
         CodexHierarchyFocus::Dialogues => {
-            "j/k move  Space toggle  a toggle-all  h/Left/Esc back  Enter copy  q cancel"
+            "j/k move  Space toggle  a toggle-all  t open-vim  h/Left/Esc back  Enter copy  q cancel"
         }
         CodexHierarchyFocus::Content => {
-            "j/k scroll  Ctrl-d/PageDown down  Ctrl-u/PageUp up  h/Left/Esc back  Enter copy  q cancel"
+            "j/k scroll  Ctrl-d/PageDown down  Ctrl-u/PageUp up  t open-vim  h/Left/Esc back  Enter copy  q cancel"
         }
     };
     let session_idx = selected_index(session_state).min(choices.len().saturating_sub(1));
@@ -1031,11 +1063,7 @@ where
 }
 
 fn try_copy_to_clipboard(text: &str) -> Result<()> {
-    arboard::Clipboard::new()
-        .context("Failed to open clipboard")?
-        .set_text(text)
-        .context("Failed to set clipboard")?;
-    Ok(())
+    sivtr_core::export::clipboard::copy_to_clipboard(text)
 }
 
 fn resolve_codex_session_path(
@@ -1886,9 +1914,9 @@ fn build_text_preview_lines(text: &str) -> String {
 mod tests {
     use super::picker::{apply_range_toggle, selection_from_entries, PickEntry};
     use super::{
-        build_codex_vim_view, build_output_preview, codex_session_preview, filter_lines_by_regex,
-        filter_lines_by_spec, finish_copy_with, format_block, is_vim_command,
-        resolve_codex_session_selector, resolve_current_codex_session_with_blocks,
+        build_codex_vim_view, build_output_preview, codex_dialogue_vim_view, codex_session_preview,
+        filter_lines_by_regex, filter_lines_by_spec, finish_copy_with, format_block,
+        is_vim_command, resolve_codex_session_selector, resolve_current_codex_session_with_blocks,
         vim_single_quote, CodexBlock, CodexBlockKind, CodexSession, CodexSessionInfo, CommandBlock,
         CommandSelection, CopyMode, TextPair,
     };
@@ -2189,6 +2217,34 @@ mod tests {
             codex_session_preview(&session).as_deref(),
             Some("first actual task")
         );
+    }
+
+    #[test]
+    fn codex_dialogue_vim_view_tracks_exact_dialogue_lines() {
+        let choice = super::CodexSessionChoice {
+            title: "session".to_string(),
+            units: vec![
+                TextPair {
+                    plain: "older dialogue".to_string(),
+                    ansi: "older dialogue".to_string(),
+                },
+                TextPair {
+                    plain: "line1\nline2\nline3\nline4".to_string(),
+                    ansi: "line1\nline2\nline3\nline4".to_string(),
+                },
+            ],
+            dialogue_titles: vec!["older dialogue".to_string(), "line1".to_string()],
+        };
+
+        let view = codex_dialogue_vim_view(&choice, 0);
+        assert_eq!(view.raw, "line1\nline2\nline3\nline4");
+        assert_eq!(view.blocks.len(), 1);
+        assert_eq!(view.blocks[0].start, 1);
+        assert_eq!(view.blocks[0].end, 4);
+        assert_eq!(view.blocks[0].block_text, view.raw);
+        assert_eq!(view.blocks[0].input_text, view.raw);
+        assert_eq!(view.blocks[0].output_text, view.raw);
+        assert!(view.alternate.is_none());
     }
 
     #[test]
