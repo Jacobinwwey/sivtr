@@ -25,7 +25,7 @@ use crate::tui::terminal::{init as init_tui, restore as restore_tui};
 use picker::{run_picker, run_single_picker, PickEntry};
 
 pub(crate) const PICK_CANCELLED_MESSAGE: &str = "Pick cancelled";
-const PICK_LIMIT: usize = 50;
+const COMMAND_PICK_LIMIT: usize = 50;
 const PICK_PREVIEW_LINES: usize = 8;
 
 pub(crate) fn is_pick_cancelled(error: &anyhow::Error) -> bool {
@@ -57,6 +57,7 @@ pub struct CopyRequest<'a> {
 pub struct AgentCopyRequest<'a> {
     pub provider: AgentProvider,
     pub selector: Option<&'a str>,
+    pub session_selector: Option<&'a str>,
     pub pick: bool,
     pub pick_current_session: bool,
     pub selection_mode: AgentSelection,
@@ -255,11 +256,12 @@ pub fn execute(request: CopyRequest<'_>) -> Result<()> {
 
 pub fn execute_agent(request: AgentCopyRequest<'_>) -> Result<()> {
     let source = request.provider.session_provider();
-    if request.pick && !request.pick_current_session {
+    if request.pick && !request.pick_current_session && request.session_selector.is_none() {
         return execute_agent_session_pick(source.as_ref(), request);
     }
 
-    let path = if request.pick && request.pick_current_session {
+    let path = if request.pick && request.pick_current_session && request.session_selector.is_none()
+    {
         let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
         match resolve_current_agent_session_with_blocks(source.as_ref(), &cwd)? {
             Some(path) => {
@@ -268,7 +270,11 @@ pub fn execute_agent(request: AgentCopyRequest<'_>) -> Result<()> {
             None => return execute_agent_session_pick(source.as_ref(), request),
         }
     } else {
-        resolve_agent_session_path(source.as_ref(), request.pick_current_session)?
+        resolve_agent_session_path(
+            source.as_ref(),
+            request.session_selector,
+            request.pick_current_session,
+        )?
     };
     let session = source.parse_session_file(&path)?;
     let provider_name = source.provider().name();
@@ -327,6 +333,7 @@ pub fn execute_agent_picker(request: AgentPickerRequest<'_>) -> Result<()> {
     let copy_request = AgentCopyRequest {
         provider: picked.provider,
         selector: None,
+        session_selector: None,
         pick: true,
         pick_current_session: request.pick_current_session,
         selection_mode: request.selection_mode,
@@ -403,7 +410,6 @@ fn pick_agent_sessions_content_on_terminal(
         )?);
     }
     choices.sort_by(|a, b| b.modified.cmp(&a.modified));
-    choices.truncate(PICK_LIMIT);
 
     if choices.is_empty() {
         anyhow::bail!("No AI sessions with selectable content found");
@@ -457,7 +463,6 @@ fn build_current_agent_session_choices(
     }
 
     choices.sort_by(|a, b| b.modified.cmp(&a.modified));
-    choices.truncate(PICK_LIMIT);
     Ok(choices)
 }
 
@@ -537,7 +542,7 @@ fn build_agent_session_choices(
 ) -> Result<Vec<AgentSessionChoice>> {
     let mut choices = Vec::new();
 
-    for info in sessions.iter().take(PICK_LIMIT) {
+    for info in sessions {
         let session = source.parse_session_file(&info.path)?;
         if let Some(choice) = build_agent_session_choice(source, info, session, selection_mode) {
             choices.push(choice);
@@ -566,7 +571,6 @@ fn build_agent_session_choice(
     let dialogue_titles = units
         .iter()
         .rev()
-        .take(PICK_LIMIT)
         .map(|unit| build_text_preview(&unit.plain))
         .collect();
 
@@ -1212,7 +1216,7 @@ fn render_prompt_override(prompt: &str, command: &str) -> String {
 
 fn pick_selection(blocks: &[IndexedCommandBlock]) -> Result<CommandSelection> {
     let total = blocks.len();
-    let shown = total.min(PICK_LIMIT);
+    let shown = total.min(COMMAND_PICK_LIMIT);
     let entries: Vec<PickEntry> = blocks
         .iter()
         .rev()
@@ -1348,8 +1352,13 @@ fn finish_copy(text: String, print_full: bool, success_message: String) -> Resul
 
 fn resolve_agent_session_path(
     source: &dyn AgentSessionProvider,
+    session_selector: Option<&str>,
     pick_current_session: bool,
 ) -> Result<std::path::PathBuf> {
+    if let Some(selector) = session_selector {
+        return resolve_explicit_agent_session_path(source, selector);
+    }
+
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
     if pick_current_session {
         return resolve_current_agent_pick_session_path(source, &cwd);
@@ -1358,6 +1367,62 @@ fn resolve_agent_session_path(
     source
         .find_current_session(&cwd)?
         .with_context(|| format!("No {} sessions found", source.provider().name()))
+}
+
+fn resolve_explicit_agent_session_path(
+    source: &dyn AgentSessionProvider,
+    selector: &str,
+) -> Result<std::path::PathBuf> {
+    let sessions = source.list_recent_sessions(None)?;
+    resolve_agent_session_selector(source, &sessions, selector)
+}
+
+fn resolve_agent_session_selector(
+    source: &dyn AgentSessionProvider,
+    sessions: &[AgentSessionInfo],
+    selector: &str,
+) -> Result<std::path::PathBuf> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        anyhow::bail!(
+            "Empty {} session selector. Use `--session 2`, `--session <id>`, or `--pick`.",
+            source.provider().name()
+        );
+    }
+
+    if let Ok(recent) = selector.parse::<usize>() {
+        if recent == 0 {
+            anyhow::bail!(
+                "Session selectors are 1-based. Use `--session 1` for the newest session."
+            );
+        }
+        if recent <= sessions.len() && !selector.starts_with('0') {
+            return Ok(sessions[recent - 1].path.clone());
+        }
+    }
+
+    sessions
+        .iter()
+        .find(|session| agent_session_matches_selector(session, selector))
+        .map(|session| session.path.clone())
+        .with_context(|| {
+            format!(
+                "No {} session matched `{selector}`. Use `--pick` to browse recent sessions.",
+                source.provider().name()
+            )
+        })
+}
+
+fn agent_session_matches_selector(session: &AgentSessionInfo, selector: &str) -> bool {
+    session
+        .id
+        .as_deref()
+        .is_some_and(|id| id == selector || id.starts_with(selector))
+        || session
+            .path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains(selector))
 }
 
 fn resolve_current_agent_pick_session_path(
@@ -1462,7 +1527,6 @@ fn build_agent_session_pick_entries(
 ) -> Result<Vec<PickEntry>> {
     sessions
         .iter()
-        .take(PICK_LIMIT)
         .enumerate()
         .map(|(idx, session)| build_agent_session_pick_entry(source, idx, session))
         .collect()
@@ -1844,7 +1908,6 @@ fn build_text_pick_entries(units: &[TextPair]) -> Vec<PickEntry> {
     units
         .iter()
         .rev()
-        .take(PICK_LIMIT)
         .enumerate()
         .map(|(offset, unit)| PickEntry {
             recent: offset + 1,
@@ -2191,9 +2254,9 @@ mod tests {
     use super::{
         agent_session_preview, build_agent_units, build_agent_vim_view,
         build_current_agent_session_choices, build_output_preview, filter_lines_by_regex,
-        filter_lines_by_spec, format_block, is_vim_command, vim_single_quote, AgentBlock,
-        AgentBlockKind, AgentProvider, AgentSelection, AgentSession, AgentSessionInfo,
-        AgentSessionProvider, CommandBlock, CommandSelection, CopyMode, TextPair,
+        filter_lines_by_spec, format_block, is_vim_command, resolve_agent_session_selector,
+        vim_single_quote, AgentBlock, AgentBlockKind, AgentProvider, AgentSelection, AgentSession,
+        AgentSessionInfo, AgentSessionProvider, CommandBlock, CommandSelection, CopyMode, TextPair,
     };
     use anyhow::Result;
     use std::path::{Path, PathBuf};
@@ -2552,6 +2615,7 @@ mod tests {
     fn current_agent_picker_lists_all_sessions_for_cwd() {
         let cwd = PathBuf::from("d:\\repo");
         let source = FakeAgentSource {
+            require_cwd: true,
             infos: vec![
                 AgentSessionInfo {
                     path: PathBuf::from("old.jsonl"),
@@ -2577,7 +2641,111 @@ mod tests {
         assert_eq!(choices[1].title, "[Codex] old task  [old]");
     }
 
+    #[test]
+    fn current_agent_picker_does_not_truncate_large_session_lists() {
+        let cwd = PathBuf::from("d:\\repo");
+        let infos = (0..60)
+            .map(|idx| AgentSessionInfo {
+                path: PathBuf::from(format!("session-{idx}.jsonl")),
+                id: Some(format!("s{idx}")),
+                cwd: Some(cwd.display().to_string()),
+                modified: SystemTime::UNIX_EPOCH + Duration::from_secs((idx + 1) as u64),
+            })
+            .collect();
+        let source = FakeAgentSource {
+            require_cwd: true,
+            infos,
+        };
+        let sources: Vec<Box<dyn AgentSessionProvider>> = vec![Box::new(source)];
+
+        let choices =
+            build_current_agent_session_choices(&sources, &cwd, AgentSelection::LastTurn).unwrap();
+
+        assert_eq!(choices.len(), 60);
+        assert_eq!(choices[0].title, "[Codex] session-59 task  [session-]");
+        assert_eq!(choices[59].title, "[Codex] session-0 task  [session-]");
+    }
+
+    #[test]
+    fn agent_text_picker_entries_include_all_units() {
+        let units = (0..75)
+            .map(|idx| TextPair {
+                plain: format!("unit {idx}"),
+                ansi: String::new(),
+            })
+            .collect::<Vec<_>>();
+
+        let entries = super::build_text_pick_entries(&units);
+
+        assert_eq!(entries.len(), 75);
+        assert_eq!(entries[0].preview, "unit 74");
+        assert_eq!(entries[74].preview, "unit 0");
+    }
+
+    #[test]
+    fn resolves_agent_session_selector_by_recent_index() {
+        let source = FakeAgentSource {
+            require_cwd: false,
+            infos: vec![
+                AgentSessionInfo {
+                    path: PathBuf::from("new.jsonl"),
+                    id: Some("new".to_string()),
+                    cwd: Some("d:\\repo".to_string()),
+                    modified: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+                },
+                AgentSessionInfo {
+                    path: PathBuf::from("old.jsonl"),
+                    id: Some("old".to_string()),
+                    cwd: Some("d:\\repo".to_string()),
+                    modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                },
+            ],
+        };
+
+        let path = resolve_agent_session_selector(&source, &source.infos, "2").unwrap();
+
+        assert_eq!(path, PathBuf::from("old.jsonl"));
+    }
+
+    #[test]
+    fn resolves_agent_session_selector_by_id_prefix() {
+        let source = FakeAgentSource {
+            require_cwd: false,
+            infos: vec![AgentSessionInfo {
+                path: PathBuf::from("rollout-019df7fb.jsonl"),
+                id: Some("019df7fb-8289-7fb0-97c3-fe5307ee1b0a".to_string()),
+                cwd: Some("d:\\repo".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            }],
+        };
+
+        let path = resolve_agent_session_selector(&source, &source.infos, "019df7fb").unwrap();
+
+        assert_eq!(path, PathBuf::from("rollout-019df7fb.jsonl"));
+    }
+
+    #[test]
+    fn rejects_zero_agent_session_selector() {
+        let source = FakeAgentSource {
+            require_cwd: false,
+            infos: vec![AgentSessionInfo {
+                path: PathBuf::from("only.jsonl"),
+                id: Some("only".to_string()),
+                cwd: Some("d:\\repo".to_string()),
+                modified: SystemTime::UNIX_EPOCH,
+            }],
+        };
+
+        let error = resolve_agent_session_selector(&source, &source.infos, "0").unwrap_err();
+
+        assert!(
+            error.to_string().contains("Session selectors are 1-based"),
+            "{error:#}"
+        );
+    }
+
     struct FakeAgentSource {
+        require_cwd: bool,
         infos: Vec<AgentSessionInfo>,
     }
 
@@ -2587,10 +2755,12 @@ mod tests {
         }
 
         fn list_recent_sessions(&self, cwd: Option<&Path>) -> Result<Vec<AgentSessionInfo>> {
-            assert!(
-                cwd.is_some(),
-                "current picker must request cwd-filtered sessions"
-            );
+            if self.require_cwd {
+                assert!(
+                    cwd.is_some(),
+                    "current picker must request cwd-filtered sessions"
+                );
+            }
             Ok(self.infos.clone())
         }
 
