@@ -100,6 +100,8 @@ Defaults:
 Session Resolution:
   By default, sivtr reads the newest Codex rollout whose `cwd`
   matches the current working directory.
+  `--session N` picks the Nth newest recorded Codex session.
+  `--session ID` matches a session id or id prefix.
 
 Selector Semantics:
   Selection is relative to the newest matching Codex item.
@@ -118,9 +120,12 @@ Filters:
 
 Examples:
   sivtr copy codex
+  sivtr copy codex --session 2
+  sivtr copy codex --session 019df7fb
   sivtr copy codex 2
   sivtr copy codex 2..4
-  sivtr copy codex out --print
+  sivtr copy codex out --session 2 --print
+  sivtr copy codex --session 2 --pick
   sivtr copy codex out --pick
   sivtr copy codex tool --regex error
   sivtr copy codex all --lines 1:20
@@ -134,6 +139,8 @@ Defaults:
 Session Resolution:
   By default, sivtr reads the newest Claude Code transcript whose `cwd`
   matches the current working directory.
+  `--session N` picks the Nth newest recorded Claude session.
+  `--session ID` matches a session id or id prefix.
 
 Selector Semantics:
   Selection is relative to the newest matching Claude Code item.
@@ -148,7 +155,10 @@ Modes:
 
 Examples:
   sivtr copy claude
+  sivtr copy claude --session 2
+  sivtr copy claude --session abc123
   sivtr copy claude out --print
+  sivtr copy claude --session 2 --pick
   sivtr copy claude --pick
   sivtr copy claude all --lines 1:20
 ";
@@ -224,15 +234,15 @@ pub enum Commands {
     /// Manage configuration
     Config(ConfigCommand),
 
-    /// Generate shell integration hook
+    /// Generate shell integration or Linux shortcut helpers
     Init {
-        /// Shell type: powershell, bash, zsh, nushell
+        /// Integration target: powershell, bash, zsh, nushell, tmux, linux-shortcut, macos-shortcut
         shell: String,
     },
 
     /// Copy recent command blocks to clipboard
     #[command(visible_alias = "c", after_help = COPY_AFTER_HELP)]
-    Copy(CopyCommand),
+    Copy(Box<CopyCommand>),
 
     /// Alias for `copy in`
     #[command(name = "ci", hide = true)]
@@ -349,6 +359,16 @@ pub struct CopySimpleArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct AgentCopyArgs {
+    #[command(flatten)]
+    pub common: CopySimpleArgs,
+
+    /// Which recorded session to read; `1` means the newest session, or pass an id / id prefix
+    #[arg(long, value_name = "N|ID")]
+    pub session: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
 #[command(group(
     ArgGroup::new("diff_content_mode")
         .args(["output", "block", "input", "cmd"])
@@ -437,13 +457,17 @@ pub struct HotkeyServeArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct HotkeyPickAgentArgs {
-    /// Working directory used to resolve current AI sessions
+    /// Working directory used for launching the picker process
     #[arg(long, value_name = "PATH")]
     pub cwd: PathBuf,
 
     /// AI provider sessions to show
     #[arg(long, default_value_t = HotkeyProviderSelection::default(), value_name = "PROVIDER")]
     pub provider: HotkeyProviderSelection,
+
+    /// Restrict the picker to sessions whose cwd matches `--cwd`
+    #[arg(long, default_value_t = false)]
+    pub current_session: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -520,22 +544,22 @@ pub struct AgentCopyCommand {
     pub mode: Option<AgentCopyMode>,
 
     #[command(flatten)]
-    pub args: CopySimpleArgs,
+    pub args: AgentCopyArgs,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum AgentCopyMode {
     /// Copy the last user message
-    In(CopySimpleArgs),
+    In(AgentCopyArgs),
 
     /// Copy the last assistant reply
-    Out(CopySimpleArgs),
+    Out(AgentCopyArgs),
 
     /// Copy the last tool output
-    Tool(CopySimpleArgs),
+    Tool(AgentCopyArgs),
 
     /// Copy the whole parsed session
-    All(CopySimpleArgs),
+    All(AgentCopyArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -565,8 +589,12 @@ pub struct CodexExportArgs {
     pub watch: bool,
 
     /// Seconds between sync passes when `--watch` is enabled
-    #[arg(long, value_name = "SECONDS", default_value_t = 2, requires = "watch")]
+    #[arg(long, value_name = "SECONDS", default_value_t = 1, requires = "watch")]
     pub interval: u64,
+
+    /// Milliseconds between sync passes when `--watch` is enabled (overrides `--interval`)
+    #[arg(long, value_name = "MILLISECONDS", requires = "watch")]
+    pub interval_ms: Option<u64>,
 }
 
 #[cfg(test)]
@@ -665,7 +693,7 @@ mod tests {
             Some(Commands::Copy(cmd)) => match cmd.mode {
                 Some(CopySubcommand::Codex(codex)) => {
                     assert!(codex.mode.is_none());
-                    assert_eq!(codex.args.common.selector, None);
+                    assert_eq!(codex.args.common.common.selector, None);
                 }
                 _ => panic!("expected copy codex mode"),
             },
@@ -680,7 +708,7 @@ mod tests {
         match cli.command {
             Some(Commands::Copy(cmd)) => match cmd.mode {
                 Some(CopySubcommand::Codex(codex)) => match codex.mode {
-                    Some(AgentCopyMode::Out(args)) => assert!(args.common.print),
+                    Some(AgentCopyMode::Out(args)) => assert!(args.common.common.print),
                     _ => panic!("expected copy codex out mode"),
                 },
                 _ => panic!("expected copy codex mode"),
@@ -696,7 +724,22 @@ mod tests {
         match cli.command {
             Some(Commands::Copy(cmd)) => match cmd.mode {
                 Some(CopySubcommand::Codex(codex)) => {
-                    assert_eq!(codex.args.common.selector.as_deref(), Some("2..4"));
+                    assert_eq!(codex.args.common.common.selector.as_deref(), Some("2..4"));
+                }
+                _ => panic!("expected copy codex mode"),
+            },
+            _ => panic!("expected copy command"),
+        }
+    }
+
+    #[test]
+    fn codex_copy_accepts_session_selector() {
+        let cli = Cli::try_parse_from(["sivtr", "copy", "codex", "--session", "2"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Copy(cmd)) => match cmd.mode {
+                Some(CopySubcommand::Codex(codex)) => {
+                    assert_eq!(codex.args.session.as_deref(), Some("2"));
                 }
                 _ => panic!("expected copy codex mode"),
             },
@@ -711,9 +754,24 @@ mod tests {
         match cli.command {
             Some(Commands::Copy(cmd)) => match cmd.mode {
                 Some(CopySubcommand::Claude(claude)) => match claude.mode {
-                    Some(AgentCopyMode::Out(args)) => assert!(args.common.print),
+                    Some(AgentCopyMode::Out(args)) => assert!(args.common.common.print),
                     _ => panic!("expected copy claude out mode"),
                 },
+                _ => panic!("expected copy claude mode"),
+            },
+            _ => panic!("expected copy command"),
+        }
+    }
+
+    #[test]
+    fn claude_copy_accepts_session_selector() {
+        let cli = Cli::try_parse_from(["sivtr", "copy", "claude", "--session", "abc123"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Copy(cmd)) => match cmd.mode {
+                Some(CopySubcommand::Claude(claude)) => {
+                    assert_eq!(claude.args.session.as_deref(), Some("abc123"));
+                }
                 _ => panic!("expected copy claude mode"),
             },
             _ => panic!("expected copy command"),
@@ -763,6 +821,27 @@ mod tests {
             Some(Commands::HotkeyPickAgent(args)) => {
                 assert_eq!(args.cwd, PathBuf::from("."));
                 assert_eq!(args.provider, HotkeyProviderSelection::default());
+                assert!(!args.current_session);
+            }
+            _ => panic!("expected hotkey-pick-agent command"),
+        }
+    }
+
+    #[test]
+    fn hotkey_pick_agent_accepts_current_session_flag() {
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "hotkey-pick-agent",
+            "--cwd",
+            ".",
+            "--current-session",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(Commands::HotkeyPickAgent(args)) => {
+                assert_eq!(args.cwd, PathBuf::from("."));
+                assert!(args.current_session);
             }
             _ => panic!("expected hotkey-pick-agent command"),
         }
@@ -791,6 +870,34 @@ mod tests {
                     assert_eq!(args.limit, 5);
                     assert!(args.watch);
                     assert_eq!(args.interval, 3);
+                    assert_eq!(args.interval_ms, None);
+                }
+            },
+            _ => panic!("expected codex export command"),
+        }
+    }
+
+    #[test]
+    fn codex_export_accepts_millisecond_interval() {
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "codex",
+            "export",
+            "--dest",
+            "/tmp/shared-codex",
+            "--watch",
+            "--interval-ms",
+            "250",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(Commands::Codex(cmd)) => match cmd.action {
+                CodexAction::Export(args) => {
+                    assert_eq!(args.dest, PathBuf::from("/tmp/shared-codex"));
+                    assert!(args.watch);
+                    assert_eq!(args.interval, 1);
+                    assert_eq!(args.interval_ms, Some(250));
                 }
             },
             _ => panic!("expected codex export command"),
@@ -814,6 +921,49 @@ mod tests {
                 assert_eq!(args, vec!["-lc".to_string(), "printf ok".to_string()]);
             }
             _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_tmux_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "tmux"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { shell }) => assert_eq!(shell, "tmux"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_linux_shortcut_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "linux-shortcut"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { shell }) => assert_eq!(shell, "linux-shortcut"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn run_accepts_hyphenated_args() {
+        let cli = Cli::try_parse_from(["sivtr", "run", "bash", "-lc", "printf ok"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Run { command, args }) => {
+                assert_eq!(command, "bash");
+                assert_eq!(args, vec!["-lc", "printf ok"]);
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_macos_shortcut_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "macos-shortcut"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { shell }) => assert_eq!(shell, "macos-shortcut"),
+            _ => panic!("expected init command"),
         }
     }
 }

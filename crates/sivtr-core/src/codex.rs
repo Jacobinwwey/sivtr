@@ -55,7 +55,17 @@ impl AgentSessionProvider for CodexProvider {
     }
 
     fn parse_session_file(&self, path: &Path) -> Result<AgentSession> {
-        parse_jsonl_session(path, PROVIDER_NAME, apply_event)
+        let session = parse_jsonl_session(path, PROVIDER_NAME, apply_event)?;
+        if !session.blocks.is_empty() {
+            return Ok(session);
+        }
+
+        let fallback = parse_jsonl_session(path, PROVIDER_NAME, apply_event_with_event_fallback)?;
+        if !fallback.blocks.is_empty() {
+            return Ok(fallback);
+        }
+
+        Ok(session)
     }
 
     fn find_session_by_id(&self, id: &str) -> Result<Option<PathBuf>> {
@@ -109,6 +119,10 @@ pub fn local_codex_sessions_dir() -> PathBuf {
 pub fn configured_codex_session_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![local_codex_sessions_dir()];
 
+    if let Ok(config) = SivtrConfig::load() {
+        dirs.extend(config.codex.session_dirs);
+    }
+
     if let Ok(extra) = std::env::var("SIVTR_CODEX_SESSION_DIRS") {
         let separator = if cfg!(windows) { ';' } else { ':' };
         dirs.extend(
@@ -118,8 +132,6 @@ pub fn configured_codex_session_dirs() -> Vec<PathBuf> {
                 .filter(|entry| !entry.is_empty())
                 .map(PathBuf::from),
         );
-    } else if let Ok(config) = SivtrConfig::load() {
-        dirs.extend(config.codex.session_dirs);
     }
 
     dedup_paths(dirs)
@@ -158,6 +170,30 @@ fn apply_event(session: &mut AgentSession, value: &Value) {
                 .map(str::to_string);
         }
         Some("response_item") => apply_response_item(session, payload, timestamp),
+        _ => {}
+    }
+}
+
+fn apply_event_with_event_fallback(session: &mut AgentSession, value: &Value) {
+    let timestamp = value
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let payload = value.get("payload").unwrap_or(&Value::Null);
+
+    match value.get("type").and_then(Value::as_str) {
+        Some("session_meta") => {
+            session.id = payload
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            session.cwd = payload
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        Some("response_item") => apply_response_item(session, payload, timestamp.clone()),
+        Some("event_msg") => apply_event_msg(session, payload, timestamp),
         _ => {}
     }
 }
@@ -204,6 +240,31 @@ fn apply_response_item(session: &mut AgentSession, payload: &Value, timestamp: O
                 .unwrap_or_default()
                 .to_string(),
         ),
+        _ => {}
+    }
+}
+
+fn apply_event_msg(session: &mut AgentSession, payload: &Value, timestamp: Option<String>) {
+    match payload.get("type").and_then(Value::as_str) {
+        Some("user_message") => push_block(
+            session,
+            AgentBlockKind::User,
+            timestamp,
+            None,
+            extract_content_text(payload.get("message").unwrap_or(&Value::Null)),
+        ),
+        Some("agent_message") => {
+            if payload.get("phase").and_then(Value::as_str) == Some("commentary") {
+                return;
+            }
+            push_block(
+                session,
+                AgentBlockKind::Assistant,
+                timestamp,
+                None,
+                extract_content_text(payload.get("message").unwrap_or(&Value::Null)),
+            );
+        }
         _ => {}
     }
 }
@@ -288,7 +349,7 @@ mod tests {
         format_blocks, select_blocks, AgentBlockKind, AgentSelection, AgentSessionProvider,
     };
     use serde_json::json;
-    use std::{env, path::PathBuf, time::Duration};
+    use std::{env, fs, path::PathBuf, time::Duration};
 
     #[test]
     fn parses_codex_rollout_messages_and_tools() {
@@ -456,6 +517,48 @@ mod tests {
     }
 
     #[test]
+    fn configured_codex_session_dirs_combines_env_and_config_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("config-home");
+        let config_dir = config_home.join("sivtr");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "[codex]\nsession_dirs = [\"/tmp/from-config\", \"/tmp/shared\"]\n",
+        )
+        .unwrap();
+
+        let previous_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let previous_extra_dirs = env::var_os("SIVTR_CODEX_SESSION_DIRS");
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        env::set_var("XDG_CONFIG_HOME", &config_home);
+        env::set_var(
+            "SIVTR_CODEX_SESSION_DIRS",
+            format!("/tmp/from-env{separator}/tmp/shared"),
+        );
+
+        let dirs = configured_codex_session_dirs();
+
+        match previous_xdg_config_home {
+            Some(value) => env::set_var("XDG_CONFIG_HOME", value),
+            None => env::remove_var("XDG_CONFIG_HOME"),
+        }
+        match previous_extra_dirs {
+            Some(value) => env::set_var("SIVTR_CODEX_SESSION_DIRS", value),
+            None => env::remove_var("SIVTR_CODEX_SESSION_DIRS"),
+        }
+
+        assert!(dirs.contains(&PathBuf::from("/tmp/from-config")));
+        assert!(dirs.contains(&PathBuf::from("/tmp/from-env")));
+        assert_eq!(
+            dirs.iter()
+                .filter(|path| *path == &PathBuf::from("/tmp/shared"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn list_recent_sessions_includes_exported_session_dirs() {
         let temp = tempfile::tempdir().unwrap();
         let codex_home = temp.path().join("codex-home");
@@ -541,5 +644,51 @@ mod tests {
         assert_eq!(session.blocks.len(), 2);
         assert_eq!(session.blocks[0].text, "hello");
         assert_eq!(session.blocks[1].text, "done");
+    }
+
+    #[test]
+    fn falls_back_to_event_messages_when_response_items_are_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"session_meta","payload":{"id":"abc","cwd":"/tmp/repo"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"hello from event"}}
+{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"working"}}
+{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"done from event"}}
+"#,
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        assert_eq!(session.id.as_deref(), Some("abc"));
+        assert_eq!(session.blocks.len(), 2);
+        assert_eq!(session.blocks[0].kind, AgentBlockKind::User);
+        assert_eq!(session.blocks[0].text, "hello from event");
+        assert_eq!(session.blocks[1].kind, AgentBlockKind::Assistant);
+        assert_eq!(session.blocks[1].text, "done from event");
+    }
+
+    #[test]
+    fn response_items_remain_primary_over_event_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"session_meta","payload":{"id":"abc"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"event user"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"response user"}]}}
+{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"event answer"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"response answer"}]}}
+"#,
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        assert_eq!(session.blocks.len(), 2);
+        assert_eq!(session.blocks[0].text, "response user");
+        assert_eq!(session.blocks[1].text, "response answer");
     }
 }

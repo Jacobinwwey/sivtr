@@ -21,6 +21,10 @@ fn export(args: CodexExportArgs) -> Result<()> {
     }
 
     let target_root = args.dest.join("sessions");
+    let watch_interval = args
+        .watch
+        .then(|| resolve_watch_interval(&args))
+        .transpose()?;
 
     loop {
         let copied = export_once(&source_root, &target_root, args.limit)?;
@@ -30,12 +34,26 @@ fn export(args: CodexExportArgs) -> Result<()> {
             target_root.display()
         );
 
-        if !args.watch {
+        let Some(watch_interval) = watch_interval else {
             return Ok(());
-        }
-
-        thread::sleep(Duration::from_secs(args.interval));
+        };
+        thread::sleep(watch_interval);
     }
+}
+
+fn resolve_watch_interval(args: &CodexExportArgs) -> Result<Duration> {
+    if let Some(interval_ms) = args.interval_ms {
+        if interval_ms == 0 {
+            anyhow::bail!("`--interval-ms` must be greater than 0 when `--watch` is enabled");
+        }
+        return Ok(Duration::from_millis(interval_ms));
+    }
+
+    if args.interval == 0 {
+        anyhow::bail!("`--interval` must be greater than 0 when `--watch` is enabled");
+    }
+
+    Ok(Duration::from_secs(args.interval))
 }
 
 fn export_once(source_root: &Path, target_root: &Path, limit: usize) -> Result<usize> {
@@ -49,6 +67,7 @@ fn export_once(source_root: &Path, target_root: &Path, limit: usize) -> Result<u
     set_shared_read_permissions(target_root)?;
 
     let mut kept = HashSet::new();
+    let mut seen_dirs = HashSet::new();
     for source in &files {
         let relative = source
             .strip_prefix(source_root)
@@ -57,14 +76,16 @@ fn export_once(source_root: &Path, target_root: &Path, limit: usize) -> Result<u
 
         let target = target_root.join(relative);
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-            set_shared_read_permissions_recursive(target_root, parent)?;
+            if seen_dirs.insert(parent.to_path_buf()) {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create {}", parent.display()))?;
+                set_shared_read_permissions_recursive(target_root, parent)?;
+            }
         }
         copy_session_file_atomically(source, &target)?;
     }
 
-    remove_stale_exported_files(target_root, &kept)?;
+    remove_stale_exported_files(target_root, &kept);
     Ok(files.len())
 }
 
@@ -121,27 +142,62 @@ fn copy_session_file_atomically(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn remove_stale_exported_files(root: &Path, kept: &HashSet<PathBuf>) -> Result<()> {
+fn remove_stale_exported_files(root: &Path, kept: &HashSet<PathBuf>) {
     if !root.exists() {
-        return Ok(());
+        return;
     }
 
-    remove_stale_exported_files_inner(root, root, kept)
+    remove_stale_exported_files_inner(root, root, kept);
 }
 
-fn remove_stale_exported_files_inner(
-    root: &Path,
-    dir: &Path,
-    kept: &HashSet<PathBuf>,
-) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
-        let entry = entry?;
+fn remove_stale_exported_files_inner(root: &Path, dir: &Path, kept: &HashSet<PathBuf>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            eprintln!(
+                "sivtr: warning: failed to read {} during stale export cleanup: {}",
+                dir.display(),
+                err
+            );
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                eprintln!(
+                    "sivtr: warning: failed to inspect an entry under {}: {}",
+                    dir.display(),
+                    err
+                );
+                continue;
+            }
+        };
         let path = entry.path();
         if path.is_dir() {
-            remove_stale_exported_files_inner(root, &path, kept)?;
-            if fs::read_dir(&path)?.next().is_none() {
-                fs::remove_dir(&path)
-                    .with_context(|| format!("Failed to remove {}", path.display()))?;
+            remove_stale_exported_files_inner(root, &path, kept);
+
+            match fs::read_dir(&path) {
+                Ok(mut children) => {
+                    if children.next().is_none() {
+                        if let Err(err) = fs::remove_dir(&path) {
+                            eprintln!(
+                                "sivtr: warning: failed to remove empty export directory {}: {}",
+                                path.display(),
+                                err
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!(
+                        "sivtr: warning: failed to re-read {} for cleanup: {}",
+                        path.display(),
+                        err
+                    );
+                }
             }
             continue;
         }
@@ -150,16 +206,27 @@ fn remove_stale_exported_files_inner(
             continue;
         }
 
-        let relative = path
-            .strip_prefix(root)
-            .with_context(|| format!("Failed to relativize {}", path.display()))?;
+        let relative = match path.strip_prefix(root) {
+            Ok(relative) => relative,
+            Err(err) => {
+                eprintln!(
+                    "sivtr: warning: failed to relativize {}: {}",
+                    path.display(),
+                    err
+                );
+                continue;
+            }
+        };
         if !kept.contains(relative) {
-            fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove stale export {}", path.display()))?;
+            if let Err(err) = fs::remove_file(&path) {
+                eprintln!(
+                    "sivtr: warning: failed to remove stale export {}: {}",
+                    path.display(),
+                    err
+                );
+            }
         }
     }
-
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -197,9 +264,14 @@ fn set_shared_read_permissions_recursive(root: &Path, path: &Path) -> Result<()>
 mod tests {
     #[cfg(unix)]
     use super::set_shared_read_permissions_recursive;
-    use super::{collect_session_files, copy_session_file_atomically, export_once};
+    use super::{
+        collect_session_files, copy_session_file_atomically, export_once, resolve_watch_interval,
+    };
+    use crate::cli::CodexExportArgs;
     #[cfg(unix)]
     use std::path::Path;
+    use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn collect_session_files_sorts_newest_first() {
@@ -293,5 +365,65 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "new data\n");
         assert!(!dir.path().join("target.jsonl.tmp").exists());
+    }
+
+    #[test]
+    fn resolve_watch_interval_defaults_to_seconds() {
+        let args = CodexExportArgs {
+            dest: PathBuf::from("/tmp/shared-codex"),
+            limit: 0,
+            watch: true,
+            interval: 2,
+            interval_ms: None,
+        };
+
+        let interval = resolve_watch_interval(&args).unwrap();
+        assert_eq!(interval, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn resolve_watch_interval_prefers_milliseconds_override() {
+        let args = CodexExportArgs {
+            dest: PathBuf::from("/tmp/shared-codex"),
+            limit: 0,
+            watch: true,
+            interval: 10,
+            interval_ms: Some(250),
+        };
+
+        let interval = resolve_watch_interval(&args).unwrap();
+        assert_eq!(interval, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn resolve_watch_interval_rejects_zero_seconds() {
+        let args = CodexExportArgs {
+            dest: PathBuf::from("/tmp/shared-codex"),
+            limit: 0,
+            watch: true,
+            interval: 0,
+            interval_ms: None,
+        };
+
+        let error = resolve_watch_interval(&args).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("`--interval` must be greater than 0"));
+    }
+
+    #[test]
+    fn resolve_watch_interval_rejects_zero_milliseconds() {
+        let args = CodexExportArgs {
+            dest: PathBuf::from("/tmp/shared-codex"),
+            limit: 0,
+            watch: true,
+            interval: 1,
+            interval_ms: Some(0),
+        };
+
+        let error = resolve_watch_interval(&args).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("`--interval-ms` must be greater than 0"));
     }
 }
