@@ -153,7 +153,7 @@ sivtr copy out --lines 10:40
 
 For shared read-only access to another account's Codex sessions, mirror them into a separate directory and add that directory to `[codex].session_dirs` instead of running `sivtr` with elevated privileges. Shared/mirrored trees only participate in explicit browsing through `--pick`.
 
-Use `--session N` to open the Nth newest recorded session, or `--session ID` to match a session id / id prefix explicitly.
+Use `--session N` to open the Nth newest selectable session (the same numbering shown in `--pick`), or `--session ID` to match a session id / id prefix explicitly.
 
 ```bash
 sivtr copy codex        # latest completed user + assistant turn

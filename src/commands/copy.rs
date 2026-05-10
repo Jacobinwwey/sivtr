@@ -274,6 +274,7 @@ pub fn execute_agent(request: AgentCopyRequest<'_>) -> Result<()> {
             source.as_ref(),
             request.session_selector,
             request.pick_current_session,
+            request.selection_mode,
         )?
     };
     let session = source.parse_session_file(&path)?;
@@ -1374,10 +1375,7 @@ fn finish_copy(text: String, print_full: bool, success_message: String) -> Resul
         return Ok(());
     }
 
-    arboard::Clipboard::new()
-        .context("Failed to open clipboard")?
-        .set_text(&text)
-        .context("Failed to set clipboard")?;
+    sivtr_core::export::clipboard::copy_to_clipboard(&text)?;
 
     if print_full {
         for line in text.lines() {
@@ -1393,9 +1391,10 @@ fn resolve_agent_session_path(
     source: &dyn AgentSessionProvider,
     session_selector: Option<&str>,
     pick_current_session: bool,
+    selection_mode: AgentSelection,
 ) -> Result<std::path::PathBuf> {
     if let Some(selector) = session_selector {
-        return resolve_explicit_agent_session_path(source, selector);
+        return resolve_explicit_agent_session_path(source, selector, selection_mode);
     }
 
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
@@ -1411,15 +1410,17 @@ fn resolve_agent_session_path(
 fn resolve_explicit_agent_session_path(
     source: &dyn AgentSessionProvider,
     selector: &str,
+    selection_mode: AgentSelection,
 ) -> Result<std::path::PathBuf> {
     let sessions = source.list_recent_sessions(None)?;
-    resolve_agent_session_selector(source, &sessions, selector)
+    resolve_agent_session_selector(source, &sessions, selector, selection_mode)
 }
 
 fn resolve_agent_session_selector(
     source: &dyn AgentSessionProvider,
     sessions: &[AgentSessionInfo],
     selector: &str,
+    selection_mode: AgentSelection,
 ) -> Result<std::path::PathBuf> {
     let selector = selector.trim();
     if selector.is_empty() {
@@ -1435,8 +1436,11 @@ fn resolve_agent_session_selector(
                 "Session selectors are 1-based. Use `--session 1` for the newest session."
             );
         }
-        if recent <= sessions.len() && !selector.starts_with('0') {
-            return Ok(sessions[recent - 1].path.clone());
+        if !selector.starts_with('0') {
+            let selectable = selectable_agent_sessions(source, sessions, selection_mode)?;
+            if recent <= selectable.len() {
+                return Ok(selectable[recent - 1].path.clone());
+            }
         }
     }
 
@@ -1450,6 +1454,24 @@ fn resolve_agent_session_selector(
                 source.provider().name()
             )
         })
+}
+
+fn selectable_agent_sessions(
+    source: &dyn AgentSessionProvider,
+    sessions: &[AgentSessionInfo],
+    selection_mode: AgentSelection,
+) -> Result<Vec<AgentSessionInfo>> {
+    let mut selectable = Vec::new();
+
+    for info in sessions {
+        let session = source.parse_session_file(&info.path)?;
+        if session.blocks.is_empty() || build_agent_units(&session, selection_mode).is_empty() {
+            continue;
+        }
+        selectable.push(info.clone());
+    }
+
+    Ok(selectable)
 }
 
 fn agent_session_matches_selector(session: &AgentSessionInfo, selector: &str) -> bool {
@@ -2317,6 +2339,7 @@ mod tests {
         AgentSessionInfo, AgentSessionProvider, CommandBlock, CommandSelection, CopyMode, TextPair,
     };
     use anyhow::Result;
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
@@ -2799,9 +2822,75 @@ mod tests {
             ],
         };
 
-        let path = resolve_agent_session_selector(&source, &source.infos, "2").unwrap();
+        let path =
+            resolve_agent_session_selector(&source, &source.infos, "2", AgentSelection::LastTurn)
+                .unwrap();
 
         assert_eq!(path, PathBuf::from("old.jsonl"));
+    }
+
+    #[test]
+    fn resolves_agent_session_selector_index_uses_selectable_sessions() {
+        let source = SparseSelectableSource {
+            infos: vec![
+                AgentSessionInfo {
+                    path: PathBuf::from("new-empty.jsonl"),
+                    id: Some("new-empty".to_string()),
+                    cwd: Some("d:\\repo".to_string()),
+                    modified: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+                },
+                AgentSessionInfo {
+                    path: PathBuf::from("older-valid.jsonl"),
+                    id: Some("older-valid".to_string()),
+                    cwd: Some("d:\\repo".to_string()),
+                    modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                },
+            ],
+            sessions: HashMap::from([
+                (
+                    PathBuf::from("new-empty.jsonl"),
+                    AgentSession {
+                        path: PathBuf::from("new-empty.jsonl"),
+                        id: Some("new-empty".to_string()),
+                        cwd: Some("d:\\repo".to_string()),
+                        blocks: vec![AgentBlock {
+                            kind: AgentBlockKind::ToolOutput,
+                            timestamp: None,
+                            label: Some("Bash".to_string()),
+                            text: "tool-only entry".to_string(),
+                        }],
+                    },
+                ),
+                (
+                    PathBuf::from("older-valid.jsonl"),
+                    AgentSession {
+                        path: PathBuf::from("older-valid.jsonl"),
+                        id: Some("older-valid".to_string()),
+                        cwd: Some("d:\\repo".to_string()),
+                        blocks: vec![
+                            AgentBlock {
+                                kind: AgentBlockKind::User,
+                                timestamp: None,
+                                label: None,
+                                text: "question".to_string(),
+                            },
+                            AgentBlock {
+                                kind: AgentBlockKind::Assistant,
+                                timestamp: None,
+                                label: None,
+                                text: "answer".to_string(),
+                            },
+                        ],
+                    },
+                ),
+            ]),
+        };
+
+        let path =
+            resolve_agent_session_selector(&source, &source.infos, "1", AgentSelection::LastTurn)
+                .unwrap();
+
+        assert_eq!(path, PathBuf::from("older-valid.jsonl"));
     }
 
     #[test]
@@ -2816,7 +2905,13 @@ mod tests {
             }],
         };
 
-        let path = resolve_agent_session_selector(&source, &source.infos, "019df7fb").unwrap();
+        let path = resolve_agent_session_selector(
+            &source,
+            &source.infos,
+            "019df7fb",
+            AgentSelection::LastTurn,
+        )
+        .unwrap();
 
         assert_eq!(path, PathBuf::from("rollout-019df7fb.jsonl"));
     }
@@ -2833,7 +2928,9 @@ mod tests {
             }],
         };
 
-        let error = resolve_agent_session_selector(&source, &source.infos, "0").unwrap_err();
+        let error =
+            resolve_agent_session_selector(&source, &source.infos, "0", AgentSelection::LastTurn)
+                .unwrap_err();
 
         assert!(
             error.to_string().contains("Session selectors are 1-based"),
@@ -2882,6 +2979,28 @@ mod tests {
                     },
                 ],
             })
+        }
+    }
+
+    struct SparseSelectableSource {
+        infos: Vec<AgentSessionInfo>,
+        sessions: HashMap<PathBuf, AgentSession>,
+    }
+
+    impl AgentSessionProvider for SparseSelectableSource {
+        fn provider(&self) -> AgentProvider {
+            AgentProvider::Codex
+        }
+
+        fn list_recent_sessions(&self, _cwd: Option<&Path>) -> Result<Vec<AgentSessionInfo>> {
+            Ok(self.infos.clone())
+        }
+
+        fn parse_session_file(&self, path: &Path) -> Result<AgentSession> {
+            self.sessions
+                .get(path)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("missing session fixture: {}", path.display()))
         }
     }
 
