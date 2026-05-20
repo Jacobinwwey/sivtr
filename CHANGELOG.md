@@ -2,6 +2,20 @@
 
 All notable user-facing changes to this project are documented here.
 
+## [0.1.3] - 2026-05-20
+
+### Added
+
+- Added the workspace picker experience for browsing AI sessions with richer content rendering, search navigation, scrolling, and line-numbered content views.
+- Added workspace copy shortcuts for AI sessions: `i` copies user input, `o` copies assistant output, and `y` copies the whole dialogue block without role headings.
+- Added project roadmap pages to the documentation site.
+
+### Fixed
+
+- Hardened VS Code picker command quoting across PowerShell, cmd.exe, fish, and POSIX shells.
+- Ignored Claude `ai-title` metadata events instead of failing session parsing.
+- Fixed CI clippy warnings.
+
 ## [0.1.2] - 2026-05-02
 
 ### Fixed

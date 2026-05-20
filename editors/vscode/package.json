@@ -2,7 +2,7 @@
   "name": "sivtr-vscode",
   "displayName": "sivtr",
   "description": "Launch the sivtr AI session picker from VS Code.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "ariestar",
   "icon": "icon.png",
   "license": "Apache-2.0",
