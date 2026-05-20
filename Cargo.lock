@@ -1300,6 +1300,7 @@ dependencies = [
  "sivtr-core",
  "tempfile",
  "tokio",
+ "unicode-width 0.2.0",
  "winapi",
 ]
 

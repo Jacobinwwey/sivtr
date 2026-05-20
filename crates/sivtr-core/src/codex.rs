@@ -226,12 +226,13 @@ fn apply_response_item(session: &mut AgentSession, payload: &Value, timestamp: O
                 }
                 _ => return,
             };
+            let text = extract_content_text(payload.get("content").unwrap_or(&Value::Null));
             push_block(
                 session,
                 kind,
                 timestamp,
                 None,
-                extract_content_text(payload.get("content").unwrap_or(&Value::Null)),
+                clean_codex_message_text(kind, text),
             );
         }
         Some("function_call") => push_block(
@@ -277,11 +278,35 @@ fn apply_event_msg(session: &mut AgentSession, payload: &Value, timestamp: Optio
                 AgentBlockKind::Assistant,
                 timestamp,
                 None,
-                extract_content_text(payload.get("message").unwrap_or(&Value::Null)),
+                clean_codex_message_text(
+                    AgentBlockKind::Assistant,
+                    extract_content_text(payload.get("message").unwrap_or(&Value::Null)),
+                ),
             );
         }
         _ => {}
     }
+}
+
+fn clean_codex_message_text(kind: AgentBlockKind, text: String) -> String {
+    if kind == AgentBlockKind::Assistant {
+        strip_trailing_oai_memory_citation(text)
+    } else {
+        text
+    }
+}
+
+fn strip_trailing_oai_memory_citation(text: String) -> String {
+    let trimmed = text.trim_end();
+    if !trimmed.ends_with("</oai-mem-citation>") {
+        return text;
+    }
+
+    let Some(start) = trimmed.rfind("<oai-mem-citation>") else {
+        return text;
+    };
+
+    text[..start].trim_end().to_string()
 }
 
 fn extract_tool_call_text(payload: &Value) -> String {
@@ -435,6 +460,44 @@ mod tests {
 
         assert_eq!(session.blocks.len(), 2);
         assert_eq!(blocks[0].text, "real answer");
+    }
+
+    #[test]
+    fn strips_trailing_memory_citation_from_codex_assistant_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"session_meta","payload":{"id":"abc"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"real answer\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:1-2|note=[x]\n</citation_entries>\n<rollout_ids>\n019e0390-a9b5-77d3-9a0c-d5993240de06\n</rollout_ids>\n</oai-mem-citation>\n"}]}}
+"#,
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        assert_eq!(session.blocks.len(), 1);
+        assert_eq!(session.blocks[0].text, "real answer");
+    }
+
+    #[test]
+    fn keeps_non_trailing_memory_citation_text_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"session_meta","payload":{"id":"abc"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"example <oai-mem-citation> literal </oai-mem-citation> text"}]}}
+"#,
+        )
+        .unwrap();
+
+        let session = CodexProvider.parse_session_file(&path).unwrap();
+
+        assert_eq!(
+            session.blocks[0].text,
+            "example <oai-mem-citation> literal </oai-mem-citation> text"
+        );
     }
 
     #[test]

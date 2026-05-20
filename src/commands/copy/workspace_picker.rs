@@ -4,9 +4,12 @@ use crossterm::event::{
 };
 use ratatui::widgets::ListState;
 use regex::Regex;
+use std::process::Command;
 
 use crate::commands::command_block_selector::CommandSelection;
-use crate::tui::content_view::{line_count, ContentViewMode};
+use crate::tui::content_view::{
+    content_link_at, content_view_line_count, line_count, ContentViewMode,
+};
 use crate::tui::terminal::{init as init_tui, restore as restore_tui};
 use crate::tui::workspace::{
     can_open_dialogue_vim, render_workspace, selected_index, workspace_help_entries,
@@ -117,9 +120,21 @@ pub(super) fn run_workspace_picker_on_terminal(
             }
             search_apply_pending = false;
         } else {
+            let size = terminal.size()?;
+            let layout = workspace_layout(
+                ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                focus,
+                fullscreen,
+            );
             content_scroll = content_scroll.min(
-                workspace_content_line_count(&dialogues, &selected_dialogues, dialogue_idx)
-                    .saturating_sub(1),
+                workspace_content_line_count(
+                    &dialogues,
+                    &selected_dialogues,
+                    dialogue_idx,
+                    layout.content,
+                    content_mode,
+                )
+                .saturating_sub(1),
             );
         }
 
@@ -586,10 +601,18 @@ pub(super) fn run_workspace_picker_on_terminal(
                         content_scroll = 0;
                     }
                     KeyCode::Char('G') if focus == WorkspaceFocus::Content => {
+                        let size = terminal.size()?;
+                        let layout = workspace_layout(
+                            ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                            focus,
+                            fullscreen,
+                        );
                         content_scroll = workspace_content_line_count(
                             &dialogues,
                             &selected_dialogues,
                             dialogue_idx,
+                            layout.content,
+                            content_mode,
                         )
                         .saturating_sub(1);
                     }
@@ -765,7 +788,25 @@ pub(super) fn run_workspace_picker_on_terminal(
                                         content_scroll = 0;
                                     }
                                 }
-                                WorkspaceFocus::Content => {}
+                                WorkspaceFocus::Content => {
+                                    let dialogue_idx = selected_index(&dialogue_state)
+                                        .min(dialogues.len().saturating_sub(1));
+                                    let text = workspace_display_text(
+                                        &dialogues,
+                                        &selected_dialogues,
+                                        dialogue_idx,
+                                    );
+                                    if let Some(target) = content_link_at(
+                                        layout.content,
+                                        &text,
+                                        content_scroll,
+                                        content_mode,
+                                        mouse.column,
+                                        mouse.row,
+                                    ) {
+                                        let _ = open_link_target(&target);
+                                    }
+                                }
                             }
                         }
                     }
@@ -836,6 +877,38 @@ fn apply_workspace_mouse_scroll(
             );
         }
     }
+}
+
+fn workspace_display_text(
+    dialogues: &[WorkspaceDialogue],
+    selected_dialogues: &[bool],
+    dialogue_idx: usize,
+) -> String {
+    workspace_picked_content(dialogues, selected_dialogues, dialogue_idx)
+        .units
+        .into_iter()
+        .map(|unit| unit.plain)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn open_link_target(target: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(target).spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(target).spawn()?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(target).spawn()?;
+    }
+
+    Ok(())
 }
 
 fn workspace_sources(sessions: &[WorkspaceSession]) -> Vec<WorkspaceSource> {
@@ -1514,6 +1587,8 @@ fn workspace_content_line_count(
     dialogues: &[WorkspaceDialogue],
     selected_dialogues: &[bool],
     highlighted_idx: usize,
+    content_area: ratatui::layout::Rect,
+    mode: ContentViewMode,
 ) -> usize {
     let selected = selected_dialogues
         .iter()
@@ -1524,7 +1599,7 @@ fn workspace_content_line_count(
     if selected.is_empty() {
         return dialogues
             .get(highlighted_idx)
-            .map(|dialogue| line_count(&dialogue.unit.plain))
+            .map(|dialogue| content_view_line_count(content_area, &dialogue.unit.plain, mode))
             .unwrap_or(1);
     }
 
@@ -1534,7 +1609,7 @@ fn workspace_content_line_count(
         .map(|dialogue| dialogue.unit.plain.as_str())
         .collect::<Vec<_>>()
         .join("\n\n");
-    line_count(&text)
+    content_view_line_count(content_area, &text, mode)
 }
 
 fn apply_dialogue_range_selection(
