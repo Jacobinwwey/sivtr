@@ -19,7 +19,7 @@ use crate::tui::workspace_search::{
 };
 
 use super::vim::{open_vim_view, VimBlock, VimView};
-use super::PICK_CANCELLED_MESSAGE;
+use super::{filter_lines_by_spec, PICK_CANCELLED_MESSAGE};
 
 const MOUSE_SCROLL_LINES: usize = 3;
 
@@ -53,6 +53,9 @@ pub(super) fn run_workspace_picker_on_terminal(
     let mut search_cursor = 0usize;
     let mut search_dirty = true;
     let mut search_apply_pending = false;
+    let mut line_filter_input_open = false;
+    let mut line_filter = String::new();
+    let mut line_filter_error: Option<String> = None;
     let mut fullscreen = None;
 
     loop {
@@ -147,6 +150,9 @@ pub(super) fn run_workspace_picker_on_terminal(
                         match_count: search_output.matches.len(),
                         input_open: show_search,
                     }),
+                    line_filter_input_open,
+                    line_filter: (!line_filter.is_empty()).then_some(line_filter.as_str()),
+                    line_filter_error: line_filter_error.as_deref(),
                     fullscreen,
                 },
             )
@@ -306,6 +312,16 @@ pub(super) fn run_workspace_picker_on_terminal(
                     continue;
                 }
 
+                if handle_line_filter_key(
+                    key.code,
+                    dialogue_count,
+                    &mut line_filter_input_open,
+                    &mut line_filter,
+                    &mut line_filter_error,
+                ) {
+                    continue;
+                }
+
                 match key.code {
                     KeyCode::Char('/') => {
                         show_help = false;
@@ -341,36 +357,64 @@ pub(super) fn run_workspace_picker_on_terminal(
                         );
                     }
                     KeyCode::Char('i') if dialogue_count > 0 => {
-                        return Ok(workspace_picked_content_for_copy(
+                        match workspace_picked_content_for_copy_with_line_filter(
                             &dialogues,
                             &selected_dialogues,
                             dialogue_idx,
                             WorkspaceCopyShortcut::Input,
-                        ));
+                            line_filter_spec(&line_filter),
+                        ) {
+                            Ok(picked) => return Ok(picked),
+                            Err(err) => {
+                                line_filter_input_open = true;
+                                line_filter_error = Some(err.to_string());
+                            }
+                        }
                     }
                     KeyCode::Char('o') if dialogue_count > 0 => {
-                        return Ok(workspace_picked_content_for_copy(
+                        match workspace_picked_content_for_copy_with_line_filter(
                             &dialogues,
                             &selected_dialogues,
                             dialogue_idx,
                             WorkspaceCopyShortcut::Output,
-                        ));
+                            line_filter_spec(&line_filter),
+                        ) {
+                            Ok(picked) => return Ok(picked),
+                            Err(err) => {
+                                line_filter_input_open = true;
+                                line_filter_error = Some(err.to_string());
+                            }
+                        }
                     }
                     KeyCode::Char('y') if dialogue_count > 0 => {
-                        return Ok(workspace_picked_content_for_copy(
+                        match workspace_picked_content_for_copy_with_line_filter(
                             &dialogues,
                             &selected_dialogues,
                             dialogue_idx,
                             WorkspaceCopyShortcut::Block,
-                        ));
+                            line_filter_spec(&line_filter),
+                        ) {
+                            Ok(picked) => return Ok(picked),
+                            Err(err) => {
+                                line_filter_input_open = true;
+                                line_filter_error = Some(err.to_string());
+                            }
+                        }
                     }
                     KeyCode::Char('c') if dialogue_count > 0 => {
-                        return Ok(workspace_picked_content_for_copy(
+                        match workspace_picked_content_for_copy_with_line_filter(
                             &dialogues,
                             &selected_dialogues,
                             dialogue_idx,
                             WorkspaceCopyShortcut::Command,
-                        ));
+                            line_filter_spec(&line_filter),
+                        ) {
+                            Ok(picked) => return Ok(picked),
+                            Err(err) => {
+                                line_filter_input_open = true;
+                                line_filter_error = Some(err.to_string());
+                            }
+                        }
                     }
                     KeyCode::Char('z') => {
                         fullscreen = toggle_fullscreen(fullscreen, focus);
@@ -615,18 +659,32 @@ pub(super) fn run_workspace_picker_on_terminal(
                             }
                         }
                         WorkspaceFocus::Dialogues => {
-                            return Ok(workspace_picked_content(
+                            match workspace_picked_content_with_line_filter(
                                 &dialogues,
                                 &selected_dialogues,
                                 dialogue_idx,
-                            ));
+                                line_filter_spec(&line_filter),
+                            ) {
+                                Ok(picked) => return Ok(picked),
+                                Err(err) => {
+                                    line_filter_input_open = true;
+                                    line_filter_error = Some(err.to_string());
+                                }
+                            }
                         }
                         WorkspaceFocus::Content => {
-                            return Ok(workspace_picked_content(
+                            match workspace_picked_content_with_line_filter(
                                 &dialogues,
                                 &selected_dialogues,
                                 dialogue_idx,
-                            ));
+                                line_filter_spec(&line_filter),
+                            ) {
+                                Ok(picked) => return Ok(picked),
+                                Err(err) => {
+                                    line_filter_input_open = true;
+                                    line_filter_error = Some(err.to_string());
+                                }
+                            }
                         }
                     },
                     _ => {}
@@ -1307,11 +1365,22 @@ pub(super) fn workspace_picked_content(
     selected_dialogues: &[bool],
     dialogue_idx: usize,
 ) -> WorkspacePickedContent {
-    workspace_picked_content_for_copy(
+    workspace_picked_content_with_line_filter(dialogues, selected_dialogues, dialogue_idx, None)
+        .expect("workspace copy without a line filter should not fail")
+}
+
+fn workspace_picked_content_with_line_filter(
+    dialogues: &[WorkspaceDialogue],
+    selected_dialogues: &[bool],
+    dialogue_idx: usize,
+    line_filter: Option<&str>,
+) -> Result<WorkspacePickedContent> {
+    workspace_picked_content_for_copy_with_line_filter(
         dialogues,
         selected_dialogues,
         dialogue_idx,
         WorkspaceCopyShortcut::Displayed,
+        line_filter,
     )
 }
 
@@ -1330,6 +1399,23 @@ fn workspace_picked_content_for_copy(
     dialogue_idx: usize,
     shortcut: WorkspaceCopyShortcut,
 ) -> WorkspacePickedContent {
+    workspace_picked_content_for_copy_with_line_filter(
+        dialogues,
+        selected_dialogues,
+        dialogue_idx,
+        shortcut,
+        None,
+    )
+    .expect("workspace copy without a line filter should not fail")
+}
+
+fn workspace_picked_content_for_copy_with_line_filter(
+    dialogues: &[WorkspaceDialogue],
+    selected_dialogues: &[bool],
+    dialogue_idx: usize,
+    shortcut: WorkspaceCopyShortcut,
+    line_filter: Option<&str>,
+) -> Result<WorkspacePickedContent> {
     let selected_indices = selected_dialogues
         .iter()
         .enumerate()
@@ -1352,11 +1438,75 @@ fn workspace_picked_content_for_copy(
             WorkspaceCopyShortcut::Command => dialogue.copy.command.clone(),
         })
         .collect::<Vec<_>>();
+    let units = apply_workspace_line_filter(units, line_filter)?;
     let selection = CommandSelection::RecentExplicit((1..=units.len()).collect());
-    WorkspacePickedContent {
+    Ok(WorkspacePickedContent {
         source: dialogues[source_idx].source,
         units,
         selection,
+    })
+}
+
+fn line_filter_spec(line_filter: &str) -> Option<&str> {
+    (!line_filter.is_empty()).then_some(line_filter)
+}
+
+fn apply_workspace_line_filter(
+    units: Vec<crate::tui::workspace::TextPair>,
+    line_filter: Option<&str>,
+) -> Result<Vec<crate::tui::workspace::TextPair>> {
+    let Some(spec) = line_filter else {
+        return Ok(units);
+    };
+
+    units
+        .into_iter()
+        .map(|unit| filter_lines_by_spec(&unit, spec))
+        .collect()
+}
+
+fn handle_line_filter_key(
+    key: KeyCode,
+    dialogue_count: usize,
+    line_filter_input_open: &mut bool,
+    line_filter: &mut String,
+    line_filter_error: &mut Option<String>,
+) -> bool {
+    if *line_filter_input_open {
+        match key {
+            KeyCode::Char(ch) if matches!(ch, '0'..='9' | ':' | ',') => {
+                line_filter.push(ch);
+                *line_filter_error = None;
+                return true;
+            }
+            KeyCode::Backspace => {
+                *line_filter_error = None;
+                if line_filter.pop().is_none() {
+                    *line_filter_input_open = false;
+                }
+                return true;
+            }
+            KeyCode::Esc => {
+                *line_filter_input_open = false;
+                line_filter.clear();
+                *line_filter_error = None;
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    match key {
+        KeyCode::Char(':') if dialogue_count > 0 => {
+            *line_filter_input_open = true;
+            *line_filter_error = None;
+            true
+        }
+        KeyCode::Esc if line_filter_error.is_some() => {
+            *line_filter_error = None;
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1704,8 +1854,10 @@ fn dialogue_text_vim_view(text: String) -> VimView {
 #[cfg(test)]
 mod tests {
     use super::{
-        workspace_dialogue_vim_view, workspace_dialogues_for_sessions, workspace_picked_content,
-        workspace_picked_content_for_copy, WorkspaceCopyShortcut, WorkspaceSearchIndex,
+        handle_line_filter_key, workspace_dialogue_vim_view, workspace_dialogues_for_sessions,
+        workspace_picked_content, workspace_picked_content_for_copy,
+        workspace_picked_content_for_copy_with_line_filter,
+        workspace_picked_content_with_line_filter, WorkspaceCopyShortcut, WorkspaceSearchIndex,
         WorkspaceSearchMatch,
     };
     use crate::commands::command_block_selector::CommandSelection;
@@ -1715,6 +1867,7 @@ mod tests {
     use crate::tui::workspace_search::{
         workspace_search_query, workspace_search_regex, WorkspaceSearchScope,
     };
+    use crossterm::event::KeyCode;
     use sivtr_core::ai::AgentProvider;
     use std::time::SystemTime;
 
@@ -2008,6 +2161,103 @@ mod tests {
         assert_eq!(input.units[0].plain, "question");
         assert_eq!(output.units[0].plain, "answer");
         assert_eq!(block.units[0].plain, "question\n\nanswer");
+    }
+
+    #[test]
+    fn workspace_line_filter_applies_to_displayed_and_structured_copies() {
+        let dialogues = vec![WorkspaceDialogue {
+            source: WorkspaceSource::Agent(AgentProvider::Codex),
+            title: "question".to_string(),
+            unit: TextPair {
+                plain: "line 1\nline 2\nline 3".to_string(),
+                ansi: String::new(),
+            },
+            copy: WorkspaceCopyParts {
+                input: TextPair {
+                    plain: "ask 1\nask 2\nask 3".to_string(),
+                    ansi: String::new(),
+                },
+                output: TextPair {
+                    plain: "answer 1\nanswer 2\nanswer 3".to_string(),
+                    ansi: String::new(),
+                },
+                block: TextPair {
+                    plain: "ask 1\nask 2\nask 3\n\nanswer 1\nanswer 2\nanswer 3".to_string(),
+                    ansi: String::new(),
+                },
+                command: TextPair::default(),
+            },
+        }];
+
+        let displayed =
+            workspace_picked_content_with_line_filter(&dialogues, &[false], 0, Some("2:3"))
+                .unwrap();
+        let input = workspace_picked_content_for_copy_with_line_filter(
+            &dialogues,
+            &[false],
+            0,
+            WorkspaceCopyShortcut::Input,
+            Some("1,3"),
+        )
+        .unwrap();
+
+        assert_eq!(displayed.units[0].plain, "line 2\nline 3");
+        assert_eq!(input.units[0].plain, "ask 1\nask 3");
+    }
+
+    #[test]
+    fn workspace_line_filter_rejects_invalid_specs() {
+        let dialogues = vec![workspace_test_dialogue("d1", "alpha\nbeta\ngamma")];
+
+        let err = workspace_picked_content_with_line_filter(&dialogues, &[false], 0, Some("x"))
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("Invalid line number"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn line_filter_key_handler_keeps_colon_inside_active_input() {
+        let mut open = false;
+        let mut filter = String::new();
+        let mut error = None;
+
+        assert!(handle_line_filter_key(
+            KeyCode::Char(':'),
+            1,
+            &mut open,
+            &mut filter,
+            &mut error,
+        ));
+        assert!(open);
+        assert_eq!(filter, "");
+
+        assert!(handle_line_filter_key(
+            KeyCode::Char('2'),
+            1,
+            &mut open,
+            &mut filter,
+            &mut error,
+        ));
+        assert!(handle_line_filter_key(
+            KeyCode::Char(':'),
+            1,
+            &mut open,
+            &mut filter,
+            &mut error,
+        ));
+        assert!(handle_line_filter_key(
+            KeyCode::Char('3'),
+            1,
+            &mut open,
+            &mut filter,
+            &mut error,
+        ));
+
+        assert_eq!(filter, "2:3");
+        assert!(open);
     }
 
     #[test]
