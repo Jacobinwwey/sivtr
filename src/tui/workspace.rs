@@ -573,6 +573,14 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
 
     if let Some(search) = view.search.filter(|search| search.input_open) {
         render_search_box(frame, centered_rect(chunks[0], 60, 12), search);
+    } else if view.line_filter_input_open || view.line_filter_error.is_some() {
+        render_line_filter_box(
+            frame,
+            centered_rect(chunks[0], 60, 14),
+            view.line_filter,
+            view.line_filter_error,
+            view.line_filter_input_open,
+        );
     } else if view.show_help {
         render_help_panel(frame, chunks[0], view.help_state);
     }
@@ -688,6 +696,51 @@ fn render_search_box(frame: &mut Frame, area: Rect, search: WorkspaceSearchView<
     let paragraph =
         Paragraph::new(search.query.to_string()).block(panel_block(&Panel::new("", title, true)));
     frame.render_widget(paragraph, area);
+}
+
+fn render_line_filter_box(
+    frame: &mut Frame,
+    area: Rect,
+    line_filter: Option<&str>,
+    line_filter_error: Option<&str>,
+    input_open: bool,
+) {
+    frame.render_widget(Clear, area);
+    let title = if line_filter_error.is_some() {
+        "Line Filter  (invalid)".to_string()
+    } else if input_open {
+        "Line Filter  (editing)".to_string()
+    } else {
+        "Line Filter".to_string()
+    };
+    let prompt = line_filter_prompt_text(line_filter, line_filter_error, input_open);
+    let paragraph = Paragraph::new(prompt).block(panel_block(&Panel::new(":", title, true)));
+    frame.render_widget(paragraph, area);
+}
+
+fn line_filter_prompt_text(
+    line_filter: Option<&str>,
+    line_filter_error: Option<&str>,
+    input_open: bool,
+) -> String {
+    if let Some(error) = line_filter_error {
+        return format!(
+            "{error}\n\nCurrent: {}\nUse 1-based specs like 2:8 or 1,3,8:12.\nEsc clears the error.",
+            line_filter.unwrap_or_default()
+        );
+    }
+
+    if input_open {
+        return format!(
+            "{}\n\nEnter keeps displayed lines.\ni/o/y/c copy filtered input, output, block, or command.\nBackspace edits. Esc clears.",
+            line_filter.unwrap_or_default()
+        );
+    }
+
+    format!(
+        "{}\n\nUse 1-based specs like 2:8 or 1,3,8:12.",
+        line_filter.unwrap_or_default()
+    )
 }
 
 fn render_help_panel(frame: &mut Frame, area: Rect, state: &ListState) {
@@ -1012,7 +1065,9 @@ fn content_preview_text(
 #[cfg(test)]
 mod tests {
     use super::WorkspaceFocus;
-    use super::{can_open_dialogue_vim, content_preview_text, content_title};
+    use super::{
+        can_open_dialogue_vim, content_preview_text, content_title, line_filter_prompt_text,
+    };
     use crate::tui::content_view::ContentViewMode;
 
     #[test]
@@ -1051,5 +1106,19 @@ mod tests {
             content_title(ContentViewMode::Raw, &[true, false]),
             "Content (raw): 1 dialogue selected"
         );
+    }
+
+    #[test]
+    fn line_filter_prompt_text_shows_current_input() {
+        let prompt = line_filter_prompt_text(Some("2:8"), None, true);
+        assert!(prompt.contains("2:8"));
+        assert!(prompt.contains("Enter keeps displayed lines."));
+    }
+
+    #[test]
+    fn line_filter_prompt_text_shows_error_and_current_value() {
+        let prompt = line_filter_prompt_text(Some("23"), Some("Invalid line number"), false);
+        assert!(prompt.contains("Invalid line number"));
+        assert!(prompt.contains("Current: 23"));
     }
 }
