@@ -1,8 +1,9 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Alignment, Color, Frame, Modifier, Style};
+use ratatui::prelude::{Alignment, Color, Frame, Modifier, Position, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use regex::Regex;
+use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
 
 use crate::tui::content_markdown::{render_markdown_lines, MarkdownLineKind};
@@ -35,6 +36,26 @@ pub(crate) struct ContentView<'a> {
     pub(crate) scroll: usize,
     pub(crate) search_regex: Option<&'a Regex>,
     pub(crate) mode: ContentViewMode,
+    pub(crate) selection: Option<ContentSelection>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContentPosition {
+    pub(crate) line: usize,
+    pub(crate) column: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContentSelection {
+    pub(crate) anchor: ContentPosition,
+    pub(crate) cursor: ContentPosition,
+    pub(crate) kind: ContentSelectionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContentSelectionKind {
+    Linear,
+    Block,
 }
 
 #[derive(Clone)]
@@ -64,15 +85,7 @@ pub(crate) fn render_content_view(
         return;
     }
 
-    let (total_lines, gutter_width) = content_layout_metrics(inner.width, view.text, view.mode);
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(gutter_width),
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
-        .split(inner);
+    let (total_lines, chunks) = content_layout(area, view.text, view.mode);
 
     let visible_height = inner.height as usize;
     let scroll = view.scroll.min(total_lines.saturating_sub(1));
@@ -93,7 +106,12 @@ pub(crate) fn render_content_view(
         chunks[1],
     );
     frame.render_widget(
-        Paragraph::new(content_lines(visible, view.search_regex)),
+        Paragraph::new(content_lines(
+            visible,
+            scroll,
+            view.search_regex,
+            view.selection,
+        )),
         chunks[2],
     );
     render_panel_scrollbar(
@@ -102,6 +120,10 @@ pub(crate) fn render_content_view(
         PanelScroll::new(scroll, total_lines, visible_height),
         panel.active(),
     );
+}
+
+pub(crate) fn content_text_area(area: Rect, text: &str, mode: ContentViewMode) -> Rect {
+    content_layout(area, text, mode).1[2]
 }
 
 pub(crate) fn content_link_at(
@@ -123,15 +145,7 @@ pub(crate) fn content_link_at(
         return None;
     }
 
-    let (total_lines, gutter_width) = content_layout_metrics(inner.width, text, mode);
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(gutter_width),
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
-        .split(inner);
+    let (total_lines, chunks) = content_layout(area, text, mode);
     let content_area = chunks[2];
     if column < content_area.x
         || column >= content_area.x.saturating_add(content_area.width)
@@ -157,12 +171,193 @@ pub(crate) fn content_link_at(
         .map(|link| link.target.clone())
 }
 
+pub(crate) fn content_position_at(
+    area: Rect,
+    text: &str,
+    scroll: usize,
+    mode: ContentViewMode,
+    column: u16,
+    row: u16,
+) -> Option<ContentPosition> {
+    let content_area = content_text_area(area, text, mode);
+    if content_area.width == 0
+        || content_area.height == 0
+        || column < content_area.x
+        || row < content_area.y
+        || column >= content_area.x.saturating_add(content_area.width)
+        || row >= content_area.y.saturating_add(content_area.height)
+    {
+        return None;
+    }
+
+    let line = scroll.saturating_add((row - content_area.y) as usize);
+    let column = (column - content_area.x) as usize;
+    Some(clamp_content_position(
+        area,
+        text,
+        mode,
+        ContentPosition { line, column },
+    ))
+}
+
+pub(crate) fn content_position_in_text_row(
+    area: Rect,
+    text: &str,
+    scroll: usize,
+    mode: ContentViewMode,
+    column: u16,
+    row: u16,
+) -> Option<ContentPosition> {
+    let inner = panel_block(&Panel::new("", "", false)).inner(area);
+    let content_area = content_text_area(area, text, mode);
+    if inner.width == 0
+        || inner.height == 0
+        || content_area.width == 0
+        || content_area.height == 0
+        || row < content_area.y
+        || row >= content_area.y.saturating_add(content_area.height)
+        || column < inner.x
+        || column >= inner.x.saturating_add(inner.width)
+    {
+        return None;
+    }
+
+    if column >= content_area.x && column < content_area.x.saturating_add(content_area.width) {
+        return content_position_at(area, text, scroll, mode, column, row);
+    }
+
+    let raw_line = scroll.saturating_add((row - content_area.y) as usize);
+    let line_count = all_content_lines(text, content_area.width as usize, mode)
+        .len()
+        .max(1);
+    let line = raw_line.min(line_count.saturating_sub(1));
+    let column = column
+        .saturating_sub(content_area.x)
+        .min(content_area.width.saturating_sub(1)) as usize;
+    Some(ContentPosition { line, column })
+}
+
+pub(crate) fn content_cursor_position(
+    area: Rect,
+    text: &str,
+    scroll: usize,
+    mode: ContentViewMode,
+    position: ContentPosition,
+) -> Option<Position> {
+    let content_area = content_text_area(area, text, mode);
+    if content_area.width == 0
+        || content_area.height == 0
+        || position.line < scroll
+        || position.line >= scroll.saturating_add(content_area.height as usize)
+    {
+        return None;
+    }
+
+    let column = position
+        .column
+        .min(content_area.width.saturating_sub(1) as usize);
+    Some(Position::new(
+        content_area.x.saturating_add(column as u16),
+        content_area
+            .y
+            .saturating_add(position.line.saturating_sub(scroll) as u16),
+    ))
+}
+
+pub(crate) fn clamp_content_position(
+    area: Rect,
+    text: &str,
+    mode: ContentViewMode,
+    position: ContentPosition,
+) -> ContentPosition {
+    let content_area = content_text_area(area, text, mode);
+    let width = content_area.width as usize;
+    let lines = all_content_lines(text, width, mode);
+    let line = position.line.min(lines.len().saturating_sub(1));
+    let max_column = line_text_width(lines.get(line).map(|line| &line.line)).saturating_sub(1);
+    ContentPosition {
+        line,
+        column: position.column.min(max_column),
+    }
+}
+
+pub(crate) fn selected_content_text(
+    area: Rect,
+    text: &str,
+    mode: ContentViewMode,
+    selection: ContentSelection,
+) -> String {
+    let content_area = content_text_area(area, text, mode);
+    let width = content_area.width as usize;
+    let lines = all_content_lines(text, width, mode);
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let selection = clamp_content_selection(area, text, mode, selection);
+    let (start, end) = normalized_selection(selection);
+    (start.line..=end.line)
+        .filter_map(|line_idx| {
+            let line = lines.get(line_idx)?;
+            let width = line_text_width(Some(&line.line));
+            let range = selection_range_for_line(selection, start, end, line_idx, width)?;
+            Some(line_text_columns(&line.line, range.start, range.end))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn clamp_content_selection(
+    area: Rect,
+    text: &str,
+    mode: ContentViewMode,
+    selection: ContentSelection,
+) -> ContentSelection {
+    if selection.kind == ContentSelectionKind::Linear {
+        return ContentSelection {
+            anchor: clamp_content_position(area, text, mode, selection.anchor),
+            cursor: clamp_content_position(area, text, mode, selection.cursor),
+            kind: selection.kind,
+        };
+    }
+
+    let content_area = content_text_area(area, text, mode);
+    let lines = all_content_lines(text, content_area.width as usize, mode);
+    let max_line = lines.len().saturating_sub(1);
+    let max_column = content_area.width.saturating_sub(1) as usize;
+    ContentSelection {
+        anchor: ContentPosition {
+            line: selection.anchor.line.min(max_line),
+            column: selection.anchor.column.min(max_column),
+        },
+        cursor: ContentPosition {
+            line: selection.cursor.line.min(max_line),
+            column: selection.cursor.column.min(max_column),
+        },
+        kind: selection.kind,
+    }
+}
+
 pub(crate) fn content_view_line_count(area: Rect, text: &str, mode: ContentViewMode) -> usize {
     let inner = panel_block(&Panel::new("", "", false)).inner(area);
     if inner.width == 0 || inner.height == 0 {
         return 1;
     }
     content_layout_metrics(inner.width, text, mode).0
+}
+
+fn content_layout(area: Rect, text: &str, mode: ContentViewMode) -> (usize, Rc<[Rect]>) {
+    let inner = panel_block(&Panel::new("", "", false)).inner(area);
+    let (total_lines, gutter_width) = content_layout_metrics(inner.width, text, mode);
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(gutter_width),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+    (total_lines, chunks)
 }
 
 fn visible_content_lines(
@@ -237,12 +432,144 @@ fn content_layout_metrics(inner_width: u16, text: &str, mode: ContentViewMode) -
     (total_lines, gutter_width)
 }
 
-fn content_lines(visible: Vec<ContentLine>, search_regex: Option<&Regex>) -> Text<'static> {
+fn content_lines(
+    visible: Vec<ContentLine>,
+    scroll: usize,
+    search_regex: Option<&Regex>,
+    selection: Option<ContentSelection>,
+) -> Text<'static> {
     let lines = visible
         .into_iter()
-        .map(|line| styled_content_line(line.line, search_regex))
+        .enumerate()
+        .map(|(idx, line)| {
+            let line_idx = scroll.saturating_add(idx);
+            let line = styled_content_line(line.line, search_regex);
+            styled_selection_line(line, selection, line_idx)
+        })
         .collect::<Vec<_>>();
     Text::from(lines)
+}
+
+fn styled_selection_line(
+    line: Line<'static>,
+    selection: Option<ContentSelection>,
+    line_idx: usize,
+) -> Line<'static> {
+    let Some(selection) = selection else {
+        return line;
+    };
+    let width = line_text_width(Some(&line));
+    let (start, end) = normalized_selection(selection);
+    let Some(range) = selection_range_for_line(selection, start, end, line_idx, width) else {
+        return line;
+    };
+    style_line_columns(line, range.start, range.end, visual_selection_style())
+}
+
+fn normalized_selection(selection: ContentSelection) -> (ContentPosition, ContentPosition) {
+    if (selection.anchor.line, selection.anchor.column)
+        <= (selection.cursor.line, selection.cursor.column)
+    {
+        (selection.anchor, selection.cursor)
+    } else {
+        (selection.cursor, selection.anchor)
+    }
+}
+
+fn selection_range_for_line(
+    selection: ContentSelection,
+    start: ContentPosition,
+    end: ContentPosition,
+    line_idx: usize,
+    line_width: usize,
+) -> Option<std::ops::Range<usize>> {
+    if line_idx < start.line || line_idx > end.line {
+        return None;
+    }
+    if selection.kind == ContentSelectionKind::Block {
+        let start_column = selection.anchor.column.min(selection.cursor.column);
+        let end_column = selection.anchor.column.max(selection.cursor.column);
+        let start = start_column.min(line_width);
+        let end = end_column.min(line_width).saturating_add(1);
+        return (start < end).then_some(start..end);
+    }
+
+    let fallback_width = line_width.max(1);
+    let range = if start.line == end.line {
+        start.column.min(line_width)..end.column.min(line_width).saturating_add(1)
+    } else if line_idx == start.line {
+        start.column.min(line_width)..fallback_width
+    } else if line_idx == end.line {
+        0..end.column.min(line_width).saturating_add(1)
+    } else {
+        0..fallback_width
+    };
+    (range.start < range.end).then_some(range)
+}
+
+fn visual_selection_style() -> Style {
+    Style::default().fg(Color::White).bg(Color::DarkGray)
+}
+
+fn style_line_columns(
+    line: Line<'static>,
+    start: usize,
+    end: usize,
+    overlay: Style,
+) -> Line<'static> {
+    let mut output = Vec::new();
+    let mut column = 0usize;
+    for span in line.spans {
+        for ch in span.content.chars() {
+            let width = char_width(ch);
+            let ch_start = column;
+            let ch_end = column.saturating_add(width.max(1));
+            let style = if ch_start < end && ch_end > start {
+                span.style.patch(overlay)
+            } else {
+                span.style
+            };
+            push_char_span(&mut output, ch, style);
+            column = column.saturating_add(width);
+        }
+    }
+
+    if output.is_empty() && start < end {
+        output.push(Span::styled(" ", overlay));
+    }
+
+    Line {
+        spans: output,
+        style: line.style,
+        alignment: line.alignment,
+    }
+}
+
+fn line_text_columns(line: &Line<'static>, start: usize, end: usize) -> String {
+    let mut output = String::new();
+    let mut column = 0usize;
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let width = char_width(ch);
+            let ch_start = column;
+            let ch_end = column.saturating_add(width.max(1));
+            if ch_start < end && ch_end > start {
+                output.push(ch);
+            }
+            column = column.saturating_add(width);
+        }
+    }
+    output
+}
+
+fn line_text_width(line: Option<&Line<'static>>) -> usize {
+    line.map(|line| {
+        line.spans
+            .iter()
+            .map(|span| text_width(span.content.as_ref()))
+            .sum()
+    })
+    .unwrap_or(0)
 }
 
 fn fit_content_line(line: ContentLine, width: usize) -> Vec<ContentLine> {
@@ -803,8 +1130,9 @@ fn raw_lines(text: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        content_lines, content_link_at, line_count, line_number_width, visible_content_lines,
-        ContentViewMode,
+        content_lines, content_link_at, content_position_at, content_position_in_text_row,
+        line_count, line_number_width, selected_content_text, visible_content_lines,
+        ContentPosition, ContentSelection, ContentSelectionKind, ContentViewMode,
     };
     use ratatui::layout::Rect;
     use ratatui::prelude::{Color, Modifier};
@@ -821,7 +1149,9 @@ mod tests {
     ) -> Text<'static> {
         content_lines(
             visible_content_lines(text, scroll, height, 80, mode),
+            scroll,
             search_regex,
+            None,
         )
     }
 
@@ -902,6 +1232,8 @@ mod tests {
     fn content_lines_wrap_wide_characters_before_terminal_clipping() {
         let rendered = content_lines(
             visible_content_lines("甲乙丙", 0, 3, 4, ContentViewMode::Reading),
+            0,
+            None,
             None,
         );
 
@@ -921,7 +1253,7 @@ mod tests {
             16,
             ContentViewMode::Reading,
         );
-        let rendered = content_lines(visible.clone(), None);
+        let rendered = content_lines(visible.clone(), 0, None, None);
 
         assert_eq!(rendered.lines.len(), 2);
         assert_eq!(rendered_line_text(&rendered, 0), "docker-compose.f");
@@ -954,6 +1286,34 @@ mod tests {
     }
 
     #[test]
+    fn content_position_at_rejects_line_number_gutter() {
+        let position = content_position_at(
+            Rect::new(0, 0, 24, 5),
+            "alpha\nbeta",
+            0,
+            ContentViewMode::Reading,
+            1,
+            1,
+        );
+
+        assert_eq!(position, None);
+    }
+
+    #[test]
+    fn content_position_in_text_row_maps_gutter_to_text_start() {
+        let position = content_position_in_text_row(
+            Rect::new(0, 0, 24, 5),
+            "alpha\nbeta",
+            0,
+            ContentViewMode::Reading,
+            1,
+            1,
+        );
+
+        assert_eq!(position, Some(ContentPosition { line: 0, column: 0 }));
+    }
+
+    #[test]
     fn content_view_line_count_uses_wrapped_reading_lines() {
         assert_eq!(
             super::content_view_line_count(
@@ -975,6 +1335,8 @@ mod tests {
                 10,
                 ContentViewMode::Reading,
             ),
+            0,
+            None,
             None,
         );
 
@@ -996,5 +1358,90 @@ mod tests {
         assert_eq!(rendered.lines[0].spans[0].content.as_ref(), "```text");
         assert_eq!(rendered.lines[1].spans[0].content.as_ref(), "**bold**");
         assert_eq!(rendered.lines[2].spans[0].content.as_ref(), "```");
+    }
+
+    #[test]
+    fn selected_content_text_uses_rendered_content_coordinates() {
+        let selected = selected_content_text(
+            Rect::new(0, 0, 40, 6),
+            "alpha\nbeta\nomega",
+            ContentViewMode::Reading,
+            ContentSelection {
+                anchor: ContentPosition { line: 0, column: 1 },
+                cursor: ContentPosition { line: 1, column: 2 },
+                kind: ContentSelectionKind::Linear,
+            },
+        );
+
+        assert_eq!(selected, "lpha\nbet");
+    }
+
+    #[test]
+    fn selected_content_text_never_includes_line_number_gutter() {
+        let selected = selected_content_text(
+            Rect::new(0, 0, 24, 5),
+            "alpha\nbeta",
+            ContentViewMode::Reading,
+            ContentSelection {
+                anchor: ContentPosition { line: 0, column: 0 },
+                cursor: ContentPosition { line: 1, column: 1 },
+                kind: ContentSelectionKind::Linear,
+            },
+        );
+
+        assert_eq!(selected, "alpha\nbe");
+    }
+
+    #[test]
+    fn selected_content_text_supports_block_selection() {
+        let selected = selected_content_text(
+            Rect::new(0, 0, 32, 6),
+            "abcdef\n12\nuvwxyz",
+            ContentViewMode::Reading,
+            ContentSelection {
+                anchor: ContentPosition { line: 0, column: 1 },
+                cursor: ContentPosition { line: 2, column: 3 },
+                kind: ContentSelectionKind::Block,
+            },
+        );
+
+        assert_eq!(selected, "bcd\n2\nvwx");
+    }
+
+    #[test]
+    fn content_lines_highlight_block_selection_per_row() {
+        let rendered = content_lines(
+            visible_content_lines("abcdef\nuvwxyz", 0, 2, 80, ContentViewMode::Reading),
+            0,
+            None,
+            Some(ContentSelection {
+                anchor: ContentPosition { line: 0, column: 1 },
+                cursor: ContentPosition { line: 1, column: 3 },
+                kind: ContentSelectionKind::Block,
+            }),
+        );
+
+        assert_eq!(rendered.lines[0].spans[1].content.as_ref(), "bcd");
+        assert_eq!(rendered.lines[1].spans[1].content.as_ref(), "vwx");
+        assert_eq!(rendered.lines[0].spans[1].style.bg, Some(Color::DarkGray));
+        assert_eq!(rendered.lines[1].spans[1].style.bg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn content_lines_highlight_visual_selection() {
+        let rendered = content_lines(
+            visible_content_lines("alpha", 0, 1, 80, ContentViewMode::Reading),
+            0,
+            None,
+            Some(ContentSelection {
+                anchor: ContentPosition { line: 0, column: 1 },
+                cursor: ContentPosition { line: 0, column: 3 },
+                kind: ContentSelectionKind::Linear,
+            }),
+        );
+
+        assert_eq!(rendered_line_text(&rendered, 0), "alpha");
+        assert_eq!(rendered.lines[0].spans[1].content.as_ref(), "lph");
+        assert_eq!(rendered.lines[0].spans[1].style.bg, Some(Color::DarkGray));
     }
 }

@@ -7,7 +7,8 @@ use std::time::SystemTime;
 
 use crate::commands::command_block_selector::CommandSelection;
 use crate::tui::content_view::{
-    highlight_spans, render_content_view, ContentView, ContentViewMode,
+    content_cursor_position, highlight_spans, render_content_view, ContentSelection, ContentView,
+    ContentViewMode,
 };
 use crate::tui::pane::{
     active_item_style, panel_block, render_list_panel, render_panel_scrollbar, selected_item_style,
@@ -168,6 +169,7 @@ pub(crate) enum WorkspaceHelpAction {
     ScrollDown,
     ScrollUp,
     ToggleContentMode,
+    VisualTextSelect,
     Copy,
     CopyInput,
     CopyOutput,
@@ -207,6 +209,7 @@ pub(crate) struct WorkspaceView<'a> {
     pub(crate) line_filter: Option<&'a str>,
     pub(crate) line_filter_error: Option<&'a str>,
     pub(crate) fullscreen: Option<WorkspaceFocus>,
+    pub(crate) content_selection: Option<ContentSelection>,
 }
 
 pub(crate) struct WorkspaceSearchView<'a> {
@@ -227,6 +230,7 @@ struct WorkspaceFooterView<'a> {
     line_filter_error: Option<&'a str>,
     fullscreen: Option<WorkspaceFocus>,
     content_mode: ContentViewMode,
+    content_selection: Option<ContentSelection>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -440,6 +444,11 @@ pub(crate) fn workspace_help_entries() -> &'static [WorkspaceHelpEntry] {
             action: WorkspaceHelpAction::ToggleContentMode,
         },
         WorkspaceHelpEntry {
+            key: "v (Content)",
+            description: "start visual text selection",
+            action: WorkspaceHelpAction::VisualTextSelect,
+        },
+        WorkspaceHelpEntry {
             key: ":",
             description: "start line filter for next copy",
             action: WorkspaceHelpAction::CloseHelp,
@@ -541,6 +550,7 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
         view.focus == WorkspaceFocus::Dialogues,
     );
 
+    let content_text = content_preview_text(view.dialogues, view.selected_dialogues, dialogue_idx);
     render_content_panel(
         frame,
         layout.content,
@@ -549,9 +559,10 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
             content_title(view.content_mode, view.selected_dialogues),
             view.focus == WorkspaceFocus::Content,
         ),
-        content_preview_text(view.dialogues, view.selected_dialogues, dialogue_idx),
+        content_text.clone(),
         view.content_scroll,
         view.content_mode,
+        view.content_selection,
         view.search.as_ref(),
         search_regex.as_ref(),
     );
@@ -568,8 +579,21 @@ pub(crate) fn render_workspace(frame: &mut Frame, view: WorkspaceView<'_>) {
             line_filter_error: view.line_filter_error,
             fullscreen: view.fullscreen,
             content_mode: view.content_mode,
+            content_selection: view.content_selection,
         },
     );
+
+    if let Some(selection) = view.content_selection.and_then(|selection| {
+        content_cursor_position(
+            layout.content,
+            &content_text,
+            view.content_scroll,
+            view.content_mode,
+            selection.cursor,
+        )
+    }) {
+        frame.set_cursor_position(selection);
+    }
 
     if let Some(search) = view.search.filter(|search| search.input_open) {
         render_search_box(frame, centered_rect(chunks[0], 60, 12), search);
@@ -596,6 +620,7 @@ fn render_footer(frame: &mut Frame, area: Rect, footer: WorkspaceFooterView<'_>)
         line_filter_error,
         fullscreen,
         content_mode,
+        content_selection,
     } = footer;
     let controls = if search.is_some() {
         let suffix = search.and_then(search_position_label).unwrap_or_default();
@@ -613,6 +638,8 @@ fn render_footer(frame: &mut Frame, area: Rect, footer: WorkspaceFooterView<'_>)
             )),
             area,
         );
+    } else if content_selection.is_some() {
+        "visual  h/j/k/l move  drag select  Ctrl-drag block  y/Enter copy  Esc/v return"
     } else if show_help {
         "j/k move  Enter execute  Esc/? close help  q cancel"
     } else {
@@ -625,7 +652,7 @@ fn render_footer(frame: &mut Frame, area: Rect, footer: WorkspaceFooterView<'_>)
                 "j/k move  Space toggle  v range  a all  : lines  i/o/y copy parts  c command  l/Right content  t vim  Enter copy  z fullscreen  / search  h/Esc back  ? help"
             }
             WorkspaceFocus::Content => {
-                "j/k scroll  : lines  i/o/y copy parts  c command  Ctrl-d/PageDown down  Ctrl-u/PageUp up  r mode  t vim  Enter copy  z fullscreen  / search  h/Esc back  ? help"
+                "j/k scroll  v select text  : lines  i/o/y copy parts  c command  Ctrl-d/PageDown down  Ctrl-u/PageUp up  r mode  t vim  Enter copy  z fullscreen  / search  h/Esc back  ? help"
             }
         }
     };
@@ -983,6 +1010,7 @@ fn render_content_panel(
     text: String,
     scroll: usize,
     mode: ContentViewMode,
+    selection: Option<ContentSelection>,
     search: Option<&WorkspaceSearchView<'_>>,
     search_regex: Option<&Regex>,
 ) {
@@ -998,6 +1026,7 @@ fn render_content_panel(
             scroll,
             search_regex: content_search,
             mode,
+            selection,
         },
     );
 }

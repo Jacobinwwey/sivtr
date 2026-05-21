@@ -8,7 +8,9 @@ use std::process::Command;
 
 use crate::commands::command_block_selector::CommandSelection;
 use crate::tui::content_view::{
-    content_link_at, content_view_line_count, line_count, ContentViewMode,
+    clamp_content_position, content_link_at, content_position_in_text_row, content_text_area,
+    content_view_line_count, line_count, selected_content_text, ContentPosition, ContentSelection,
+    ContentSelectionKind, ContentViewMode,
 };
 use crate::tui::terminal::{init as init_tui, restore as restore_tui};
 use crate::tui::workspace::{
@@ -25,6 +27,19 @@ use super::vim::{open_vim_view, VimBlock, VimView};
 use super::{filter_lines_by_spec, PICK_CANCELLED_MESSAGE};
 
 const MOUSE_SCROLL_LINES: usize = 3;
+
+#[derive(Clone, Copy)]
+struct VisualSelectMode {
+    selection: ContentSelection,
+    dragging: bool,
+}
+
+struct VisualContentContext<'a> {
+    area: ratatui::layout::Rect,
+    text: &'a str,
+    mode: ContentViewMode,
+    scroll: usize,
+}
 
 pub(super) fn run_workspace_picker_on_terminal(
     terminal: &mut crate::tui::terminal::Tui,
@@ -60,6 +75,7 @@ pub(super) fn run_workspace_picker_on_terminal(
     let mut line_filter = String::new();
     let mut line_filter_error: Option<String> = None;
     let mut fullscreen = None;
+    let mut visual_select_mode = None;
 
     loop {
         if search_dirty {
@@ -169,13 +185,48 @@ pub(super) fn run_workspace_picker_on_terminal(
                     line_filter: (!line_filter.is_empty()).then_some(line_filter.as_str()),
                     line_filter_error: line_filter_error.as_deref(),
                     fullscreen,
+                    content_selection: visual_select_mode
+                        .map(|mode: VisualSelectMode| mode.selection),
                 },
             )
         })?;
+        if visual_select_mode.is_some() {
+            terminal.show_cursor()?;
+        }
 
         match event::read()? {
             Event::Key(key) => {
                 if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
+                if let Some(mode) = visual_select_mode.as_mut() {
+                    let size = terminal.size()?;
+                    let layout = workspace_layout(
+                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                        focus,
+                        fullscreen,
+                    );
+                    let text =
+                        workspace_display_text(&dialogues, &selected_dialogues, dialogue_idx);
+                    if let Some(picked) = handle_visual_select_key(
+                        key.code,
+                        key.modifiers,
+                        mode,
+                        layout.content,
+                        &text,
+                        content_mode,
+                        &mut content_scroll,
+                        &dialogues,
+                        &selected_dialogues,
+                        dialogue_idx,
+                    )? {
+                        return Ok(picked);
+                    }
+                    if matches!(key.code, KeyCode::Esc | KeyCode::Char('v')) {
+                        visual_select_mode = None;
+                        terminal.hide_cursor()?;
+                    }
                     continue;
                 }
 
@@ -312,6 +363,7 @@ pub(super) fn run_workspace_picker_on_terminal(
                                 &mut show_search,
                                 &mut search_query,
                                 &mut search_dirty,
+                                &mut visual_select_mode,
                                 &sessions,
                                 &dialogues,
                                 session_idx,
@@ -619,6 +671,21 @@ pub(super) fn run_workspace_picker_on_terminal(
                     KeyCode::Char('r') if focus == WorkspaceFocus::Content => {
                         content_mode = content_mode.toggle();
                     }
+                    KeyCode::Char('v') if focus == WorkspaceFocus::Content => {
+                        let size = terminal.size()?;
+                        let layout = workspace_layout(
+                            ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                            focus,
+                            fullscreen,
+                        );
+                        enter_visual_select_mode(
+                            &mut visual_select_mode,
+                            &mut content_scroll,
+                            layout.content,
+                            &workspace_display_text(&dialogues, &selected_dialogues, dialogue_idx),
+                            content_mode,
+                        );
+                    }
                     KeyCode::Char(' ') => match focus {
                         WorkspaceFocus::Source => {
                             let source_idx = selected_index(&source_state);
@@ -712,6 +779,28 @@ pub(super) fn run_workspace_picker_on_terminal(
                     },
                     _ => {}
                 }
+            }
+            Event::Mouse(mouse) if visual_select_mode.is_some() => {
+                let size = terminal.size()?;
+                let layout = workspace_layout(
+                    ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                    focus,
+                    fullscreen,
+                );
+                let text = workspace_display_text(&dialogues, &selected_dialogues, dialogue_idx);
+                handle_visual_select_mouse(
+                    visual_select_mode.as_mut().expect("checked above"),
+                    mouse.kind,
+                    mouse.modifiers,
+                    mouse.column,
+                    mouse.row,
+                    VisualContentContext {
+                        area: layout.content,
+                        text: &text,
+                        mode: content_mode,
+                        scroll: content_scroll,
+                    },
+                );
             }
             Event::Mouse(mouse) if show_help && !show_search => match mouse.kind {
                 MouseEventKind::ScrollUp => scroll_list_state_up(&mut help_state),
@@ -815,6 +904,241 @@ pub(super) fn run_workspace_picker_on_terminal(
             }
             _ => {}
         }
+    }
+}
+
+fn enter_visual_select_mode(
+    visual_select_mode: &mut Option<VisualSelectMode>,
+    content_scroll: &mut usize,
+    content_area: ratatui::layout::Rect,
+    text: &str,
+    mode: ContentViewMode,
+) {
+    let position = clamp_content_position(
+        content_area,
+        text,
+        mode,
+        ContentPosition {
+            line: *content_scroll,
+            column: 0,
+        },
+    );
+    *content_scroll = position.line;
+    *visual_select_mode = Some(VisualSelectMode {
+        selection: ContentSelection {
+            anchor: position,
+            cursor: position,
+            kind: ContentSelectionKind::Linear,
+        },
+        dragging: false,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_visual_select_key(
+    key: KeyCode,
+    modifiers: KeyModifiers,
+    mode: &mut VisualSelectMode,
+    content_area: ratatui::layout::Rect,
+    text: &str,
+    content_mode: ContentViewMode,
+    content_scroll: &mut usize,
+    dialogues: &[WorkspaceDialogue],
+    selected_dialogues: &[bool],
+    dialogue_idx: usize,
+) -> Result<Option<WorkspacePickedContent>> {
+    match key {
+        KeyCode::Esc | KeyCode::Char('v') => return Ok(None),
+        KeyCode::Enter | KeyCode::Char('y') => {
+            return Ok(Some(workspace_picked_content_for_visual_selection(
+                dialogues,
+                selected_dialogues,
+                dialogue_idx,
+                content_area,
+                text,
+                content_mode,
+                mode.selection,
+            )));
+        }
+        KeyCode::Left | KeyCode::Char('h') => move_visual_cursor(
+            mode,
+            content_area,
+            text,
+            content_mode,
+            content_scroll,
+            -1,
+            0,
+        ),
+        KeyCode::Right | KeyCode::Char('l') => {
+            move_visual_cursor(mode, content_area, text, content_mode, content_scroll, 1, 0)
+        }
+        KeyCode::Up | KeyCode::Char('k') => move_visual_cursor(
+            mode,
+            content_area,
+            text,
+            content_mode,
+            content_scroll,
+            0,
+            -1,
+        ),
+        KeyCode::Down | KeyCode::Char('j') => {
+            move_visual_cursor(mode, content_area, text, content_mode, content_scroll, 0, 1)
+        }
+        KeyCode::Home | KeyCode::Char('0') => {
+            mode.selection.cursor.column = 0;
+        }
+        KeyCode::End | KeyCode::Char('$') => {
+            mode.selection.cursor = clamp_content_position(
+                content_area,
+                text,
+                content_mode,
+                ContentPosition {
+                    line: mode.selection.cursor.line,
+                    column: usize::MAX,
+                },
+            );
+        }
+        KeyCode::PageDown | KeyCode::Char('d')
+            if key == KeyCode::PageDown || modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            move_visual_cursor(
+                mode,
+                content_area,
+                text,
+                content_mode,
+                content_scroll,
+                0,
+                10,
+            )
+        }
+        KeyCode::PageUp | KeyCode::Char('u')
+            if key == KeyCode::PageUp || modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            move_visual_cursor(
+                mode,
+                content_area,
+                text,
+                content_mode,
+                content_scroll,
+                0,
+                -10,
+            )
+        }
+        _ => {}
+    }
+    ensure_visual_cursor_visible(mode, content_area, text, content_mode, content_scroll);
+    Ok(None)
+}
+
+fn move_visual_cursor(
+    mode: &mut VisualSelectMode,
+    content_area: ratatui::layout::Rect,
+    text: &str,
+    content_mode: ContentViewMode,
+    content_scroll: &mut usize,
+    column_delta: isize,
+    line_delta: isize,
+) {
+    let cursor = mode.selection.cursor;
+    let line = cursor.line.saturating_add_signed(line_delta);
+    let column = cursor.column.saturating_add_signed(column_delta);
+    mode.selection.cursor = clamp_content_position(
+        content_area,
+        text,
+        content_mode,
+        ContentPosition { line, column },
+    );
+    ensure_visual_cursor_visible(mode, content_area, text, content_mode, content_scroll);
+}
+
+fn ensure_visual_cursor_visible(
+    mode: &VisualSelectMode,
+    content_area: ratatui::layout::Rect,
+    text: &str,
+    content_mode: ContentViewMode,
+    content_scroll: &mut usize,
+) {
+    let text_area = content_text_area(content_area, text, content_mode);
+    let height = text_area.height as usize;
+    if height == 0 {
+        return;
+    }
+    let cursor_line = mode.selection.cursor.line;
+    if cursor_line < *content_scroll {
+        *content_scroll = cursor_line;
+    } else if cursor_line >= content_scroll.saturating_add(height) {
+        *content_scroll = cursor_line.saturating_add(1).saturating_sub(height);
+    }
+}
+
+fn handle_visual_select_mouse(
+    mode: &mut VisualSelectMode,
+    kind: MouseEventKind,
+    modifiers: KeyModifiers,
+    column: u16,
+    row: u16,
+    content: VisualContentContext<'_>,
+) {
+    let Some(position) = content_position_in_text_row(
+        content.area,
+        content.text,
+        content.scroll,
+        content.mode,
+        column,
+        row,
+    ) else {
+        return;
+    };
+
+    match kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            mode.selection = ContentSelection {
+                anchor: position,
+                cursor: position,
+                kind: mouse_selection_kind(modifiers),
+            };
+            mode.dragging = true;
+        }
+        MouseEventKind::Drag(MouseButton::Left) if mode.dragging => {
+            mode.selection.cursor = position;
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                mode.selection.kind = ContentSelectionKind::Block;
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            mode.selection.cursor = position;
+            mode.dragging = false;
+        }
+        _ => {}
+    }
+}
+
+fn mouse_selection_kind(modifiers: KeyModifiers) -> ContentSelectionKind {
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        ContentSelectionKind::Block
+    } else {
+        ContentSelectionKind::Linear
+    }
+}
+
+fn workspace_picked_content_for_visual_selection(
+    dialogues: &[WorkspaceDialogue],
+    selected_dialogues: &[bool],
+    dialogue_idx: usize,
+    content_area: ratatui::layout::Rect,
+    text: &str,
+    content_mode: ContentViewMode,
+    selection: ContentSelection,
+) -> WorkspacePickedContent {
+    let source = workspace_picked_content(dialogues, selected_dialogues, dialogue_idx).source;
+    let plain = selected_content_text(content_area, text, content_mode, selection);
+    WorkspacePickedContent {
+        source,
+        units: vec![crate::tui::workspace::TextPair {
+            ansi: plain.clone(),
+            plain,
+        }],
+        selection: CommandSelection::RecentExplicit(vec![1]),
     }
 }
 
@@ -1168,6 +1492,7 @@ fn apply_workspace_help_action(
     show_search: &mut bool,
     search_query: &mut String,
     search_dirty: &mut bool,
+    visual_select_mode: &mut Option<VisualSelectMode>,
     sessions: &[WorkspaceSession],
     dialogues: &[WorkspaceDialogue],
     session_idx: usize,
@@ -1340,6 +1665,21 @@ fn apply_workspace_help_action(
         }
         WorkspaceHelpAction::ToggleContentMode if *focus == WorkspaceFocus::Content => {
             *content_mode = content_mode.toggle();
+        }
+        WorkspaceHelpAction::VisualTextSelect if *focus == WorkspaceFocus::Content => {
+            let size = terminal.size()?;
+            let layout = workspace_layout(
+                ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                *focus,
+                *fullscreen,
+            );
+            enter_visual_select_mode(
+                visual_select_mode,
+                content_scroll,
+                layout.content,
+                &workspace_display_text(dialogues, selected_dialogues, dialogue_idx),
+                *content_mode,
+            );
         }
         WorkspaceHelpAction::Copy => match *focus {
             WorkspaceFocus::Source => set_focus(focus, fullscreen, WorkspaceFocus::Sessions),
