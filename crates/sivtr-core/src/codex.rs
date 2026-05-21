@@ -67,6 +67,7 @@ impl AgentSessionProvider for CodexProvider {
                     path,
                     id: meta.id,
                     cwd: meta.cwd,
+                    title: meta.title,
                 });
             }
         }

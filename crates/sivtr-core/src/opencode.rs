@@ -45,18 +45,19 @@ impl AgentSessionProvider for OpenCodeProvider {
         let wanted = cwd.map(normalize_path_for_match);
         let conn = open_readonly_db(&db_path)?;
         let mut stmt = conn.prepare(
-            "select id, directory, time_updated from session order by time_updated desc, id desc",
+            "select id, directory, time_updated, title from session order by time_updated desc, id desc",
         )?;
         let rows = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
             let cwd: String = row.get(1)?;
             let updated: i64 = row.get(2)?;
-            Ok((id, cwd, updated))
+            let title: String = row.get(3)?;
+            Ok((id, cwd, updated, title))
         })?;
 
         let mut sessions = Vec::new();
         for row in rows {
-            let (id, session_cwd, updated) = row?;
+            let (id, session_cwd, updated, title) = row?;
             if let Some(wanted) = wanted.as_deref() {
                 if normalize_path_for_match(Path::new(&session_cwd)) != wanted {
                     continue;
@@ -68,6 +69,7 @@ impl AgentSessionProvider for OpenCodeProvider {
                 path: opencode_session_path(&id),
                 id: Some(id),
                 cwd: Some(session_cwd),
+                title: Some(title).filter(|title| !title.trim().is_empty()),
             });
         }
 
@@ -118,9 +120,15 @@ impl OpenCodeProvider {
         let conn = open_readonly_db(&db_path)?;
         let meta = conn
             .query_row(
-                "select id, directory from session where id = ?1",
+                "select id, directory, title from session where id = ?1",
                 params![session_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
             )
             .optional()?
             .with_context(|| format!("OpenCode session `{session_id}` was not found"))?;
@@ -129,6 +137,7 @@ impl OpenCodeProvider {
             path: opencode_session_path(&meta.0),
             id: Some(meta.0),
             cwd: Some(meta.1),
+            title: Some(meta.2).filter(|title| !title.trim().is_empty()),
             blocks: Vec::new(),
         };
 
@@ -386,6 +395,7 @@ mod tests {
             create table session (
                 id text primary key,
                 directory text not null,
+                title text not null,
                 time_updated integer not null
             );
             create table message (
@@ -412,8 +422,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "insert into session (id, directory, time_updated) values (?1, ?2, ?3)",
-            params!["open-session", "D:\\sivtr", 1000_i64],
+            "insert into session (id, directory, title, time_updated) values (?1, ?2, ?3, ?4)",
+            params!["open-session", "D:\\sivtr", "Greeting", 1000_i64],
         )
         .unwrap();
         conn.execute(
@@ -463,6 +473,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id.as_deref(), Some("open-session"));
         assert_eq!(sessions[0].cwd.as_deref(), Some("D:\\sivtr"));
+        assert_eq!(sessions[0].title.as_deref(), Some("Greeting"));
     }
 
     #[test]
@@ -477,6 +488,7 @@ mod tests {
 
         assert_eq!(session.id.as_deref(), Some("open-session"));
         assert_eq!(session.cwd.as_deref(), Some("D:\\sivtr"));
+        assert_eq!(session.title.as_deref(), Some("Greeting"));
         assert_eq!(session.blocks.len(), 4);
         assert_eq!(session.blocks[0].kind, AgentBlockKind::User);
         assert_eq!(session.blocks[0].text, "hello");

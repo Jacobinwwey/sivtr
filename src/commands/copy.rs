@@ -251,6 +251,7 @@ pub fn execute_agent(request: AgentCopyRequest<'_>) -> Result<()> {
             path: path.clone(),
             id: session.id.clone(),
             cwd: session.cwd.clone(),
+            title: session.title.clone(),
             modified: std::fs::metadata(&path)
                 .and_then(|metadata| metadata.modified())
                 .unwrap_or(SystemTime::UNIX_EPOCH),
@@ -474,6 +475,7 @@ fn pick_current_agent_session_content_on_terminal(
         path: path.to_path_buf(),
         id: session.id.clone(),
         cwd: session.cwd.clone(),
+        title: session.title.clone(),
         modified: SystemTime::UNIX_EPOCH,
     };
     let choice =
@@ -1071,7 +1073,11 @@ fn agent_session_preview(session: &AgentSession) -> Option<String> {
 }
 
 fn agent_session_display_title(info: &AgentSessionInfo, session: &AgentSession) -> String {
-    let title = agent_session_preview(session)
+    let title = session
+        .title
+        .clone()
+        .or_else(|| info.title.clone())
+        .or_else(|| agent_session_preview(session))
         .or_else(|| session.id.clone())
         .or_else(|| info.id.clone())
         .unwrap_or_else(|| "<empty AI session>".to_string());
@@ -1445,6 +1451,7 @@ mod tests {
             path: "claude.jsonl".into(),
             id: Some("abc".to_string()),
             cwd: Some("d:\\repo".to_string()),
+            title: None,
             blocks: vec![
                 AgentBlock {
                     kind: AgentBlockKind::User,
@@ -1494,6 +1501,7 @@ mod tests {
             path: "codex.jsonl".into(),
             id: Some("abc".to_string()),
             cwd: Some("d:\\repo".to_string()),
+            title: None,
             blocks: vec![
                 AgentBlock {
                     kind: AgentBlockKind::User,
@@ -1530,12 +1538,14 @@ mod tests {
                     path: PathBuf::from("old.jsonl"),
                     id: Some("old".to_string()),
                     cwd: Some(cwd.display().to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
                 },
                 AgentSessionInfo {
                     path: PathBuf::from("new.jsonl"),
                     id: Some("new".to_string()),
                     cwd: Some(cwd.display().to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
                 },
             ],
@@ -1558,6 +1568,7 @@ mod tests {
                 path: PathBuf::from(format!("session-{idx}.jsonl")),
                 id: Some(format!("s{idx}")),
                 cwd: Some(cwd.display().to_string()),
+                title: None,
                 modified: SystemTime::UNIX_EPOCH + Duration::from_secs((idx + 1) as u64),
             })
             .collect();
@@ -1584,12 +1595,14 @@ mod tests {
                     path: PathBuf::from("new.jsonl"),
                     id: Some("new".to_string()),
                     cwd: Some("d:\\repo".to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
                 },
                 AgentSessionInfo {
                     path: PathBuf::from("old.jsonl"),
                     id: Some("old".to_string()),
                     cwd: Some("d:\\repo".to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
                 },
             ],
@@ -1610,12 +1623,14 @@ mod tests {
                     path: PathBuf::from("new-empty.jsonl"),
                     id: Some("new-empty".to_string()),
                     cwd: Some("d:\\repo".to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(2),
                 },
                 AgentSessionInfo {
                     path: PathBuf::from("older-valid.jsonl"),
                     id: Some("older-valid".to_string()),
                     cwd: Some("d:\\repo".to_string()),
+                    title: None,
                     modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
                 },
             ],
@@ -1626,6 +1641,7 @@ mod tests {
                         path: PathBuf::from("new-empty.jsonl"),
                         id: Some("new-empty".to_string()),
                         cwd: Some("d:\\repo".to_string()),
+                        title: None,
                         blocks: vec![AgentBlock {
                             kind: AgentBlockKind::ToolOutput,
                             timestamp: None,
@@ -1640,6 +1656,7 @@ mod tests {
                         path: PathBuf::from("older-valid.jsonl"),
                         id: Some("older-valid".to_string()),
                         cwd: Some("d:\\repo".to_string()),
+                        title: None,
                         blocks: vec![
                             AgentBlock {
                                 kind: AgentBlockKind::User,
@@ -1674,6 +1691,7 @@ mod tests {
                 path: PathBuf::from("rollout-019df7fb.jsonl"),
                 id: Some("019df7fb-8289-7fb0-97c3-fe5307ee1b0a".to_string()),
                 cwd: Some("d:\\repo".to_string()),
+                title: None,
                 modified: SystemTime::UNIX_EPOCH,
             }],
         };
@@ -1697,6 +1715,7 @@ mod tests {
                 path: PathBuf::from("only.jsonl"),
                 id: Some("only".to_string()),
                 cwd: Some("d:\\repo".to_string()),
+                title: None,
                 modified: SystemTime::UNIX_EPOCH,
             }],
         };
@@ -1737,6 +1756,7 @@ mod tests {
                 path: path.to_path_buf(),
                 id: Some(id.clone()),
                 cwd: Some("d:\\repo".to_string()),
+                title: None,
                 blocks: vec![
                     AgentBlock {
                         kind: AgentBlockKind::User,
@@ -1783,6 +1803,7 @@ mod tests {
             path: "rollout.jsonl".into(),
             id: Some("abc".to_string()),
             cwd: Some("d:\\repo".to_string()),
+            title: None,
             blocks: vec![
                 AgentBlock {
                     kind: AgentBlockKind::User,

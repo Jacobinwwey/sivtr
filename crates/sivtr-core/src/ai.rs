@@ -135,6 +135,7 @@ pub struct AgentSession {
     pub path: PathBuf,
     pub id: Option<String>,
     pub cwd: Option<String>,
+    pub title: Option<String>,
     pub blocks: Vec<AgentBlock>,
 }
 
@@ -143,6 +144,7 @@ pub struct AgentSessionInfo {
     pub path: PathBuf,
     pub id: Option<String>,
     pub cwd: Option<String>,
+    pub title: Option<String>,
     pub modified: SystemTime,
 }
 
@@ -150,6 +152,7 @@ pub struct AgentSessionInfo {
 pub struct AgentSessionMeta {
     pub id: Option<String>,
     pub cwd: Option<String>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +227,7 @@ pub fn list_recent_jsonl_sessions(
             path,
             id: meta.id,
             cwd: meta.cwd,
+            title: meta.title,
         });
     }
 
@@ -244,6 +248,7 @@ pub fn parse_jsonl_session(
         path: path.to_path_buf(),
         id: None,
         cwd: None,
+        title: None,
         blocks: Vec::new(),
     };
 
@@ -308,7 +313,7 @@ pub fn parse_jsonl_meta(
             )
         })?;
         update_meta(&mut meta, &value);
-        if meta.id.is_some() && meta.cwd.is_some() {
+        if meta.id.is_some() && meta.cwd.is_some() && meta.title.is_some() {
             break;
         }
     }
