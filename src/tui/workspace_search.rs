@@ -95,7 +95,7 @@ impl WorkspaceSearchIndex {
         for (session_index, session) in sessions.iter().enumerate() {
             session_entries.push(WorkspaceSearchSessionEntry {
                 session_index,
-                session_title: session.title.clone(),
+                session_title: session.search_title.clone(),
             });
 
             for (dialogue_index, (dialogue_title, unit)) in session

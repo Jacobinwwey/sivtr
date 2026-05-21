@@ -518,6 +518,7 @@ fn build_agent_session_choice(
     }
 
     let title = agent_session_display_title(info, &session);
+    let search_title = agent_session_search_title(info, &session);
     let dialogue_titles = units
         .iter()
         .map(|unit| build_text_preview(&unit.plain))
@@ -527,6 +528,7 @@ fn build_agent_session_choice(
         source: WorkspaceSource::Agent(source.provider()),
         modified: info.modified,
         title,
+        search_title,
         units,
         copy_units,
         dialogue_titles,
@@ -647,10 +649,12 @@ fn build_terminal_workspace_session(
         dialogue_titles.push(title);
     }
     let block_count = dialogue_titles.len();
+    let title = format!("current shell  [{block_count} blocks]");
     Some(WorkspaceSession {
         source: WorkspaceSource::Terminal,
         modified,
-        title: format!("current shell  [{block_count} blocks]"),
+        search_title: title.clone(),
+        title,
         units,
         copy_units,
         dialogue_titles,
@@ -1077,10 +1081,7 @@ fn agent_session_display_title(info: &AgentSessionInfo, session: &AgentSession) 
         .title
         .clone()
         .or_else(|| info.title.clone())
-        .or_else(|| agent_session_preview(session))
-        .or_else(|| session.id.clone())
-        .or_else(|| info.id.clone())
-        .unwrap_or_else(|| "<empty AI session>".to_string());
+        .unwrap_or_else(|| agent_session_fallback_title(info, session));
     let id = session
         .id
         .as_deref()
@@ -1091,6 +1092,21 @@ fn agent_session_display_title(info: &AgentSessionInfo, session: &AgentSession) 
         Some(id) if !id.is_empty() => format!("{title}  [{id}]"),
         _ => title,
     }
+}
+
+fn agent_session_fallback_title(info: &AgentSessionInfo, session: &AgentSession) -> String {
+    agent_session_preview(session)
+        .or_else(|| session.id.clone())
+        .or_else(|| info.id.clone())
+        .unwrap_or_else(|| "<empty AI session>".to_string())
+}
+
+fn agent_session_search_title(info: &AgentSessionInfo, session: &AgentSession) -> String {
+    session
+        .title
+        .clone()
+        .or_else(|| info.title.clone())
+        .unwrap_or_else(|| agent_session_fallback_title(info, session))
 }
 
 fn short_agent_id(id: &str) -> String {

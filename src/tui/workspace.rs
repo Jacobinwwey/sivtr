@@ -82,6 +82,7 @@ pub(crate) struct WorkspaceSession {
     pub(crate) source: WorkspaceSource,
     pub(crate) modified: SystemTime,
     pub(crate) title: String,
+    pub(crate) search_title: String,
     pub(crate) units: Vec<TextPair>,
     pub(crate) copy_units: Vec<WorkspaceCopyParts>,
     pub(crate) dialogue_titles: Vec<String>,

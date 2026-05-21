@@ -2229,6 +2229,7 @@ mod tests {
             source: WorkspaceSource::Agent(AgentProvider::Codex),
             modified: SystemTime::UNIX_EPOCH,
             title: "session".to_string(),
+            search_title: "session".to_string(),
             units: vec![TextPair {
                 plain: "first\nneedle one\nmiddle\nneedle two".to_string(),
                 ansi: String::new(),
@@ -2517,6 +2518,7 @@ mod tests {
             source,
             modified: SystemTime::UNIX_EPOCH,
             title: title.to_string(),
+            search_title: title.to_string(),
             units: dialogue_titles
                 .iter()
                 .map(|dialogue_title| TextPair {
