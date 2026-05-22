@@ -24,6 +24,7 @@ struct SearchJsonResult {
     session: String,
     dialogue: String,
     line: usize,
+    timestamp: Option<String>,
     snippet: String,
 }
 
@@ -31,6 +32,7 @@ struct SearchResult<'a> {
     session: &'a WorkspaceSession,
     dialogue_title: &'a str,
     line_index: usize,
+    timestamp: Option<&'a str>,
     snippet: String,
 }
 
@@ -59,6 +61,7 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
                     session: result.session.title.clone(),
                     dialogue: result.dialogue_title.to_string(),
                     line: result.line_index + 1,
+                    timestamp: result.timestamp.map(str::to_string),
                     snippet: result.snippet.clone(),
                 })
                 .collect(),
@@ -86,6 +89,9 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
             result.session.title
         );
         println!("   dialogue: {}", result.dialogue_title);
+        if let Some(timestamp) = result.timestamp {
+            println!("   timestamp: {timestamp}");
+        }
         println!("   line {}: {}", result.line_index + 1, result.snippet);
     }
 
@@ -122,10 +128,15 @@ fn collect_results<'a>(
                 .unwrap_or(dialogue_title)
                 .trim()
                 .to_string();
+            let timestamp = session
+                .unit_timestamps
+                .get(matched.dialogue_index)
+                .and_then(|timestamp| timestamp.as_deref());
             Some(SearchResult {
                 session,
                 dialogue_title,
                 line_index: matched.line_index,
+                timestamp,
                 snippet,
             })
         })
