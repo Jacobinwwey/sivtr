@@ -20,8 +20,16 @@ struct SearchJsonOutput {
 
 #[derive(Serialize)]
 struct SearchJsonResult {
+    index: usize,
+    #[serde(rename = "ref")]
+    ref_: String,
+    session_ref: String,
+    dialogue_ref: String,
+    kind: String,
     source: String,
+    session_id: String,
     session: String,
+    dialogue_index: usize,
     dialogue: String,
     line: usize,
     timestamp: Option<String>,
@@ -31,6 +39,7 @@ struct SearchJsonResult {
 struct SearchResult<'a> {
     session: &'a WorkspaceSession,
     dialogue_title: &'a str,
+    dialogue_index: usize,
     line_index: usize,
     timestamp: Option<&'a str>,
     snippet: String,
@@ -56,13 +65,26 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
             match_count: output.matches.len(),
             results: results
                 .iter()
-                .map(|result| SearchJsonResult {
-                    source: source_name(result.session.source).to_string(),
-                    session: result.session.title.clone(),
-                    dialogue: result.dialogue_title.to_string(),
-                    line: result.line_index + 1,
-                    timestamp: result.timestamp.map(str::to_string),
-                    snippet: result.snippet.clone(),
+                .enumerate()
+                .map(|(idx, result)| {
+                    let source = source_name(result.session.source).to_string();
+                    let session_ref = format!("{}/{}", source, result.session.ref_id);
+                    let dialogue_ref = format!("{}/{}", session_ref, result.dialogue_index + 1);
+                    SearchJsonResult {
+                        index: idx + 1,
+                        ref_: format!("{}/{}", dialogue_ref, result.line_index + 1),
+                        session_ref,
+                        dialogue_ref,
+                        kind: kind_name(result.session.source).to_string(),
+                        source,
+                        session_id: result.session.ref_id.clone(),
+                        session: result.session.title.clone(),
+                        dialogue_index: result.dialogue_index + 1,
+                        dialogue: result.dialogue_title.to_string(),
+                        line: result.line_index + 1,
+                        timestamp: result.timestamp.map(str::to_string),
+                        snippet: result.snippet.clone(),
+                    }
                 })
                 .collect(),
         };
@@ -121,6 +143,11 @@ fn collect_results<'a>(
                 .get(matched.dialogue_index)
                 .map(String::as_str)
                 .unwrap_or("<unknown>");
+            let dialogue_index = session
+                .original_dialogue_indices
+                .get(matched.dialogue_index)
+                .copied()
+                .unwrap_or(matched.dialogue_index);
             let snippet = session
                 .units
                 .get(matched.dialogue_index)
@@ -135,6 +162,7 @@ fn collect_results<'a>(
             Some(SearchResult {
                 session,
                 dialogue_title,
+                dialogue_index,
                 line_index: matched.line_index,
                 timestamp,
                 snippet,
@@ -147,6 +175,13 @@ fn source_name(source: WorkspaceSource) -> &'static str {
     match source {
         WorkspaceSource::Terminal => "terminal",
         WorkspaceSource::Agent(provider) => provider.command_name(),
+    }
+}
+
+fn kind_name(source: WorkspaceSource) -> &'static str {
+    match source {
+        WorkspaceSource::Terminal => "shell",
+        WorkspaceSource::Agent(_) => "ai",
     }
 }
 
