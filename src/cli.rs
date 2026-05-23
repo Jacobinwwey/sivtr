@@ -1247,79 +1247,135 @@ pub enum LayerAction {
         cwd: Option<String>,
     },
 
-    /// List all known workspaces
-    Workspaces,
+    /// List all known workspaces (compact refs by default; use -c for details)
+    Workspaces(LayerListArgs),
 
     /// List sources in the current workspace
-    Sources {
-        /// Workspace name (defaults to current directory)
-        #[arg(long, value_name = "NAME")]
-        workspace: Option<String>,
-    },
+    Sources(LayerScopedArgs),
 
     /// List sessions for a workspace + source
-    Sessions {
-        /// Source name (terminal, claude, codex, opencode, pi)
-        source: String,
-        /// Workspace name (defaults to current directory)
-        #[arg(long, value_name = "NAME")]
-        workspace: Option<String>,
-    },
+    Sessions(LayerSessionsArgs),
 
     /// List dialogues for a workspace + source + session
-    Dialogues {
-        /// Source name
-        source: String,
-        /// Session ID
-        session: String,
-        /// Workspace name (defaults to current directory)
-        #[arg(long, value_name = "NAME")]
-        workspace: Option<String>,
-    },
+    Dialogues(LayerDialoguesArgs),
 
-    /// Show content for a specific dialogue (all its input + output entries)
-    Content {
-        /// Source name
-        source: String,
-        /// Session ID
-        session: String,
-        /// Dialogue ID
-        dialogue: String,
-        /// Workspace name (defaults to current directory)
-        #[arg(long, value_name = "NAME")]
-        workspace: Option<String>,
-    },
+    /// Show full content for a specific dialogue
+    Content(LayerContentArgs),
 
-    /// Search across input/output tables by keyword
-    Query {
-        /// Search keyword (regex)
-        keyword: String,
-        /// Search scope: all, input, output
-        #[arg(long, default_value = "all")]
-        scope: String,
-        /// Filter by source
-        #[arg(long, value_name = "SOURCE")]
-        source: Option<String>,
-        /// Maximum results
-        #[arg(short, long, default_value = "20")]
-        limit: usize,
-    },
+    /// Search across input/output tables (compact refs by default; use -c for content)
+    Query(LayerQueryArgs),
 
-    /// Show the full layer tree for the current workspace
-    Tree {
-        /// Workspace name (defaults to current directory)
-        #[arg(long, value_name = "NAME")]
-        workspace: Option<String>,
-        /// Maximum depth: 1=workspaces, 2=+sources, 3=+sessions, 4=+dialogues, 5=+content
-        #[arg(long, default_value = "3")]
-        depth: usize,
-    },
+    /// Show the layer hierarchy as a tree
+    Tree(LayerTreeArgs),
 
-    /// Show a specific input or output entry by ID
-    Show {
-        /// Table: i (input) or o (output)
-        table: String,
-        /// Entry ID
-        id: i64,
-    },
+    /// Show a specific input or output entry by ID (always shows full content)
+    Show(LayerShowArgs),
+}
+
+/// Output control flags shared across layer list commands.
+/// Default: compact ref-based output (ref + summary only).
+/// Use -n for sequence numbers, -t for timestamps, -c for full content, --json for machines.
+#[derive(Args, Debug, Clone)]
+pub struct LayerOutputFlags {
+    /// Include 1-based sequence numbers (query-time enumeration, not stable across runs)
+    #[arg(short = 'n', long)]
+    pub numbers: bool,
+    /// Include timestamps
+    #[arg(short = 't', long)]
+    pub timestamps: bool,
+    /// Output as machine-readable JSON
+    #[arg(long)]
+    pub json: bool,
+    /// Include full content (default: refs and metadata only)
+    #[arg(short = 'c', long)]
+    pub content: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerListArgs {
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerScopedArgs {
+    /// Workspace name (defaults to current directory)
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerSessionsArgs {
+    /// Source name (terminal, claude, codex, opencode, pi)
+    pub source: String,
+    /// Workspace name (defaults to current directory)
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerDialoguesArgs {
+    /// Source name
+    pub source: String,
+    /// Session ID (or prefix)
+    pub session: String,
+    /// Workspace name (defaults to current directory)
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerContentArgs {
+    /// Source name
+    pub source: String,
+    /// Session ID (or prefix)
+    pub session: String,
+    /// Dialogue ID
+    pub dialogue: String,
+    /// Workspace name (defaults to current directory)
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerQueryArgs {
+    /// Search keyword (regex)
+    pub keyword: String,
+    /// Search scope: all, input, output
+    #[arg(long, default_value = "all")]
+    pub scope: String,
+    /// Filter by source
+    #[arg(long, value_name = "SOURCE")]
+    pub source: Option<String>,
+    /// Maximum results
+    #[arg(short, long, default_value = "20")]
+    pub limit: usize,
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerTreeArgs {
+    /// Workspace name (defaults to current directory)
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+    /// Maximum depth: 1=workspaces, 2=+sources, 3=+sessions, 4=+dialogues, 5=+content
+    #[arg(long, default_value = "3", value_name = "N")]
+    pub depth: usize,
+    #[command(flatten)]
+    pub output: LayerOutputFlags,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LayerShowArgs {
+    /// Table: i (input) or o (output)
+    pub table: String,
+    /// Entry ID
+    pub id: i64,
 }
