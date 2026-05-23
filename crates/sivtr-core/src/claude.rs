@@ -77,12 +77,10 @@ fn apply_event(session: &mut AgentSession, value: &Value) {
             | "system"
             | "queue-operation",
         ) => {}
-        Some(event_type) => {
-            panic!("Unexpected Claude event type: {event_type}");
-        }
-        None => {
-            panic!("Claude event must include type");
-        }
+        // New Claude Code versions may add event types. Skip unknown ones
+        // instead of panicking so existing sessions remain parseable.
+        Some(_) => {}
+        None => {}
     }
 }
 

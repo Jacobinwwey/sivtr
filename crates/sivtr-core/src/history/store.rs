@@ -301,23 +301,23 @@ impl HistoryStore {
 
     /// List distinct workspaces.
     pub fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
+        // Use UNION to collect all distinct workspaces, then aggregate per workspace.
         let mut stmt = self.conn.prepare(
             "SELECT
-                coalesce(i.workspace, o.workspace) as workspace,
-                (SELECT count(distinct source) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
-                  + (SELECT count(distinct source) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as source_count,
-                (SELECT count(distinct session_id) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
-                  + (SELECT count(distinct session_id) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as session_count,
-                (SELECT count(distinct dialogue_id) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
-                  + (SELECT count(distinct dialogue_id) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as dialogue_count,
+                w.ws as workspace,
+                (SELECT count(distinct source) FROM input WHERE workspace = w.ws)
+                  + (SELECT count(distinct source) FROM output WHERE workspace = w.ws) as source_count,
+                (SELECT count(distinct session_id) FROM input WHERE workspace = w.ws)
+                  + (SELECT count(distinct session_id) FROM output WHERE workspace = w.ws) as session_count,
+                (SELECT count(distinct dialogue_id) FROM input WHERE workspace = w.ws)
+                  + (SELECT count(distinct dialogue_id) FROM output WHERE workspace = w.ws) as dialogue_count,
                 coalesce(
-                  (SELECT max(timestamp) FROM input WHERE workspace = coalesce(i.workspace, o.workspace)),
-                  (SELECT max(timestamp) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)),
+                  (SELECT max(timestamp) FROM input WHERE workspace = w.ws),
+                  (SELECT max(timestamp) FROM output WHERE workspace = w.ws),
                   ''
                 ) as last_active
-             FROM input i
-             FULL OUTER JOIN output o ON i.workspace = o.workspace
-             GROUP BY workspace
+             FROM (SELECT workspace as ws FROM input
+                   UNION SELECT workspace FROM output) w
              ORDER BY last_active DESC",
         )?;
         let entries = stmt

@@ -184,7 +184,7 @@ mod tests {
         let outputs = store.list_dialogue_outputs(&path).unwrap();
 
         assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0].content, "❯ cargo build");
+        assert_eq!(inputs[0].content, "❯  cargo build");
         assert_eq!(inputs[0].content_type, "command");
         assert_eq!(outputs.len(), 1);
         assert!(outputs[0].content.contains("Compiling"));

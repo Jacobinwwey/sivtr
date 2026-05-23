@@ -1379,3 +1379,32 @@ pub struct LayerShowArgs {
     /// Entry ID
     pub id: i64,
 }
+
+#[derive(Parser, Debug)]
+pub struct HistoryCommand {
+    #[command(subcommand)]
+    pub action: Option<HistoryAction>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HistoryAction {
+    /// Search history by keyword
+    Search {
+        /// Search keyword
+        keyword: String,
+        /// Maximum number of results
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+    },
+    /// Show a specific history entry
+    Show {
+        /// History entry ID
+        id: i64,
+    },
+    /// List recent history entries
+    List {
+        /// Maximum number of entries to show
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+    },
+}

@@ -64,6 +64,31 @@ fn resolve_workspace(workspace: Option<String>) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Current directory is not valid UTF-8"))
 }
 
+/// Resolve a session prefix to the full session_id stored in the database.
+fn resolve_session_id(
+    store: &HistoryStore,
+    workspace: &str,
+    source: &str,
+    session_prefix: &str,
+) -> Result<String> {
+    let sessions = store.list_sessions(workspace, source)?;
+    // Exact match first
+    if sessions.iter().any(|s| s.id == session_prefix) {
+        return Ok(session_prefix.to_string());
+    }
+    // Prefix match
+    sessions
+        .iter()
+        .find(|s| s.id.starts_with(session_prefix))
+        .map(|s| s.id.clone())
+        .with_context(|| {
+            format!(
+                "No session matching `{session_prefix}` in `{workspace}/{source}`.\n\
+                 Run `sivtr layer sessions {source} -w {workspace} -n` to list sessions."
+            )
+        })
+}
+
 /// Build a stable ref string: `{source}/{session_ref}/{dialogue_id}`
 fn session_ref(session_id: &str) -> &str {
     &session_id[..session_id.len().min(8)]
@@ -231,9 +256,12 @@ fn list_dialogues(
     session_id: &str,
     flags: &LayerOutputFlags,
 ) -> Result<()> {
-    let dialogues = store.list_dialogues(workspace, source, session_id)?;
+    // Resolve session prefix to full session_id
+    let full_id = resolve_session_id(store, workspace, source, session_id)?;
+    let dialogues = store.list_dialogues(workspace, source, &full_id)?;
     if dialogues.is_empty() {
-        println!("No dialogues for `{workspace}/{source}/{session_ref(session_id)}`.");
+        let sref = session_ref(&full_id);
+        println!("No dialogues for `{workspace}/{source}/{sref}`.");
         return Ok(());
     }
 
@@ -262,22 +290,19 @@ fn show_content(
     session_id: &str,
     dialogue_id: &str,
 ) -> Result<()> {
+    let full_session_id = resolve_session_id(store, workspace, source, session_id)?;
     let path = LayerPath {
         workspace: workspace.to_string(),
         source: source.to_string(),
-        session_id: session_id.to_string(),
+        session_id: full_session_id.clone(),
         dialogue_id: dialogue_id.to_string(),
     };
 
     let inputs = store.list_dialogue_inputs(&path)?;
     let outputs = store.list_dialogue_outputs(&path)?;
 
-    println!(
-        "{}  {}i + {}o",
-        ref_for_dialogue(source, session_id, dialogue_id),
-        inputs.len(),
-        outputs.len()
-    );
+    let dlg_ref = ref_for_dialogue(source, &full_session_id, dialogue_id);
+    println!("{dlg_ref}  {}i + {}o", inputs.len(), outputs.len());
 
     for (i, input) in inputs.iter().enumerate() {
         println!(
@@ -499,12 +524,6 @@ fn sync_all(
     provider: Option<&str>,
     cwd_override: Option<&str>,
 ) -> Result<()> {
-    let workspace = if let Some(cwd) = cwd_override {
-        cwd.to_string()
-    } else {
-        resolve_workspace(None)?
-    };
-
     eprintln!("Syncing terminal session log...");
     match capture_history::sync_terminal_session_log(store) {
         Ok(n) => eprintln!("  terminal: {n} dialogue(s) synced"),
@@ -528,7 +547,7 @@ fn sync_all(
 
     for p in &providers {
         eprintln!("Syncing {} sessions...", p.name());
-        match sync_agent_sessions(store, *p, &workspace) {
+        match sync_agent_sessions(store, *p, cwd_override) {
             Ok(n) => eprintln!("  {}: {n} dialogue(s) synced across all sessions", p.name()),
             Err(e) => eprintln!("  {}: error ({e:#})", p.name()),
         }
@@ -541,12 +560,14 @@ fn sync_all(
 fn sync_agent_sessions(
     store: &HistoryStore,
     provider: AgentProvider,
-    workspace: &str,
+    cwd_filter: Option<&str>,
 ) -> Result<usize> {
     let source = provider.session_provider();
     let source_name = provider.command_name();
-    let sessions =
-        source.list_recent_sessions(Some(std::path::Path::new(workspace)))?;
+    let cwd_path = cwd_filter.map(std::path::Path::new);
+
+    let sessions = source.list_recent_sessions(cwd_path)?;
+    eprintln!("    {} session(s)", sessions.len());
 
     let mut total_dialogues = 0;
     for info in &sessions {
@@ -554,6 +575,12 @@ fn sync_agent_sessions(
             .id
             .clone()
             .unwrap_or_else(|| info.path.to_string_lossy().to_string());
+
+        // Use the session's own CWD as workspace, fall back to "unknown"
+        let workspace = info
+            .cwd
+            .as_deref()
+            .unwrap_or("unknown");
 
         if store.is_session_synced(workspace, source_name, &session_id)? {
             continue;
