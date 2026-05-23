@@ -574,7 +574,7 @@ fn map_output_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutputEntry> {
 }
 
 pub(crate) fn build_fts_query(query: &str) -> String {
-    let trimmed = query.trim();
+    let trimmed = query;
     if trimmed.is_empty() {
         return "\"\"".to_string();
     }
@@ -605,5 +605,5 @@ pub(crate) fn build_fts_query(query: &str) -> String {
 
 /// Check if a query contains only FTS-safe terms (ASCII, no CJK).
 pub(crate) fn query_needs_like_fallback(query: &str) -> bool {
-    query.trim().split_whitespace().any(|term| !term.is_ascii())
+    query.split_whitespace().any(|term| !term.is_ascii())
 }

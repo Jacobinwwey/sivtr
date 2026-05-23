@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::cli::{LayerAction, LayerCommand, LayerOutputFlags};
 use crate::commands::capture_history;
-use sivtr_core::ai::{AgentProvider, AgentSessionProvider};
+use sivtr_core::ai::AgentProvider;
 use sivtr_core::history::layer::LayerPath;
 use sivtr_core::history::HistoryStore;
 
