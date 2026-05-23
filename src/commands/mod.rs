@@ -11,6 +11,7 @@ pub mod history;
 pub mod hotkey;
 pub mod import;
 pub mod init;
+pub mod layer;
 pub mod pipe;
 pub mod run;
 pub mod search;

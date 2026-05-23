@@ -9,6 +9,7 @@ use sivtr_core::ai::{
     AgentSession, AgentSessionInfo, AgentSessionProvider,
 };
 use sivtr_core::capture::scrollback;
+use sivtr_core::history::HistoryStore;
 use sivtr_core::session::{self, SessionEntry};
 
 mod vim;
@@ -633,6 +634,9 @@ fn build_agent_session_choice(
         return None;
     }
 
+    // Lazy-sync parsed session blocks to i/o tables (best-effort, non-blocking)
+    lazy_sync_agent_session(source.provider(), info, &session);
+
     let title = agent_session_display_title(info, &session);
     let search_title = agent_session_search_title(info, &session);
     let dialogue_titles = units
@@ -655,6 +659,36 @@ fn build_agent_session_choice(
         original_dialogue_indices,
         load: None,
     })
+}
+
+/// Best-effort background sync of parsed agent session to i/o tables.
+fn lazy_sync_agent_session(
+    provider: AgentProvider,
+    info: &AgentSessionInfo,
+    session: &AgentSession,
+) {
+    let session_id = session
+        .id
+        .clone()
+        .or_else(|| info.id.clone())
+        .unwrap_or_else(|| info.path.to_string_lossy().to_string());
+    let workspace = session
+        .cwd
+        .clone()
+        .or_else(|| info.cwd.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let source_name = provider.command_name();
+
+    // Skip if already synced (quick check to avoid unnecessary writes)
+    if let Ok(store) = HistoryStore::open_default() {
+        if store
+            .is_session_synced(&workspace, source_name, &session_id)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let _ = store.sync_agent_session(&workspace, source_name, &session_id, session);
+    }
 }
 
 fn workspace_sessions_from_agent_choices(

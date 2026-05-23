@@ -339,6 +339,10 @@ pub enum Commands {
     /// Manage output history
     History(HistoryCommand),
 
+    /// Navigate the 5-layer I/O hierarchy (workspace > source > session > dialogue > content)
+    #[command(visible_alias = "l")]
+    Layer(LayerCommand),
+
     /// Search captured terminal and AI workspace sessions
     #[command(after_help = SEARCH_AFTER_HELP)]
     Search(SearchArgs),
@@ -1226,30 +1230,96 @@ pub enum ConfigAction {
 }
 
 #[derive(Parser, Debug)]
-pub struct HistoryCommand {
+pub struct LayerCommand {
     #[command(subcommand)]
-    pub action: Option<HistoryAction>,
+    pub action: LayerAction,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum HistoryAction {
-    /// Search history by keyword
-    Search {
-        /// Search keyword
+pub enum LayerAction {
+    /// Sync terminal session log and agent sessions into i/o tables
+    Sync {
+        /// Also sync agent sessions from the specified provider(s)
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+        /// Workspace directory (defaults to current)
+        #[arg(long, value_name = "PATH")]
+        cwd: Option<String>,
+    },
+
+    /// List all known workspaces
+    Workspaces,
+
+    /// List sources in the current workspace
+    Sources {
+        /// Workspace name (defaults to current directory)
+        #[arg(long, value_name = "NAME")]
+        workspace: Option<String>,
+    },
+
+    /// List sessions for a workspace + source
+    Sessions {
+        /// Source name (terminal, claude, codex, opencode, pi)
+        source: String,
+        /// Workspace name (defaults to current directory)
+        #[arg(long, value_name = "NAME")]
+        workspace: Option<String>,
+    },
+
+    /// List dialogues for a workspace + source + session
+    Dialogues {
+        /// Source name
+        source: String,
+        /// Session ID
+        session: String,
+        /// Workspace name (defaults to current directory)
+        #[arg(long, value_name = "NAME")]
+        workspace: Option<String>,
+    },
+
+    /// Show content for a specific dialogue (all its input + output entries)
+    Content {
+        /// Source name
+        source: String,
+        /// Session ID
+        session: String,
+        /// Dialogue ID
+        dialogue: String,
+        /// Workspace name (defaults to current directory)
+        #[arg(long, value_name = "NAME")]
+        workspace: Option<String>,
+    },
+
+    /// Search across input/output tables by keyword
+    Query {
+        /// Search keyword (regex)
         keyword: String,
-        /// Maximum number of results
+        /// Search scope: all, input, output
+        #[arg(long, default_value = "all")]
+        scope: String,
+        /// Filter by source
+        #[arg(long, value_name = "SOURCE")]
+        source: Option<String>,
+        /// Maximum results
         #[arg(short, long, default_value = "20")]
         limit: usize,
     },
-    /// Show a specific history entry
+
+    /// Show the full layer tree for the current workspace
+    Tree {
+        /// Workspace name (defaults to current directory)
+        #[arg(long, value_name = "NAME")]
+        workspace: Option<String>,
+        /// Maximum depth: 1=workspaces, 2=+sources, 3=+sessions, 4=+dialogues, 5=+content
+        #[arg(long, default_value = "3")]
+        depth: usize,
+    },
+
+    /// Show a specific input or output entry by ID
     Show {
-        /// History entry ID
+        /// Table: i (input) or o (output)
+        table: String,
+        /// Entry ID
         id: i64,
-    },
-    /// List recent history entries
-    List {
-        /// Maximum number of entries to show
-        #[arg(short, long, default_value = "20")]
-        limit: usize,
     },
 }

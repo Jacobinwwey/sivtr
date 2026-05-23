@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sivtr_core::config::SivtrConfig;
 use sivtr_core::history::{CaptureSource, HistoryStore};
+use sivtr_core::session;
 
 pub fn maybe_save_default(
     config: &SivtrConfig,
@@ -26,6 +27,42 @@ fn maybe_save(
     store.insert(content, command, source)?;
     store.trim_to_max_entries(config.history.max_entries)?;
     Ok(())
+}
+
+/// Sync the terminal session log entries into i/o tables.
+/// Reads the session JSONL log and persists each entry's input/output split.
+pub fn sync_terminal_session_log(store: &HistoryStore) -> Result<usize> {
+    let log_path = sivtr_core::capture::scrollback::session_log_path();
+    if !log_path.exists() {
+        return Ok(0);
+    }
+
+    let entries = session::load_entries(&log_path)?;
+    let workspace = resolve_cwd();
+    let session_id = "terminal-current".to_string();
+    let mut synced = 0;
+
+    for entry in &entries {
+        match store.sync_terminal_dialogue(
+            &workspace,
+            &session_id,
+            &entry.command,
+            &entry.prompt,
+            &entry.output,
+        ) {
+            Ok(_) => synced += 1,
+            Err(e) => eprintln!("sivtr: failed to sync terminal dialogue: {e:#}"),
+        }
+    }
+
+    Ok(synced)
+}
+
+fn resolve_cwd() -> String {
+    std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]

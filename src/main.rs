@@ -40,6 +40,9 @@ fn run() -> Result<()> {
         Some(Commands::History(hist_cmd)) => {
             commands::history::execute(hist_cmd)?;
         }
+        Some(Commands::Layer(layer_cmd)) => {
+            commands::layer::execute(layer_cmd)?;
+        }
         Some(Commands::Search(args)) => {
             commands::search::execute(&args)?;
         }
