@@ -690,8 +690,12 @@ mod tests {
 
         let previous_codex_home = env::var_os("CODEX_HOME");
         let previous_dirs = env::var_os("SIVTR_CODEX_SESSION_DIRS");
+        let previous_config = env::var_os("SIVTR_CONFIG");
+        let empty_config = temp.path().join("empty-config.toml");
+        std::fs::write(&empty_config, "").unwrap();
         env::set_var("CODEX_HOME", &codex_home);
         env::set_var("SIVTR_CODEX_SESSION_DIRS", exported_root.join("sessions"));
+        env::set_var("SIVTR_CONFIG", &empty_config);
 
         let sessions = CodexProvider.list_recent_sessions(None).unwrap();
 
@@ -702,6 +706,10 @@ mod tests {
         match previous_dirs {
             Some(value) => env::set_var("SIVTR_CODEX_SESSION_DIRS", value),
             None => env::remove_var("SIVTR_CODEX_SESSION_DIRS"),
+        }
+        match previous_config {
+            Some(value) => env::set_var("SIVTR_CONFIG", value),
+            None => env::remove_var("SIVTR_CONFIG"),
         }
 
         assert_eq!(sessions.len(), 2);

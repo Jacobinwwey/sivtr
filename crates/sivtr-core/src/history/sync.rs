@@ -98,9 +98,16 @@ impl HistoryStore {
     }
 
     /// Check if a session has been synced (has at least one dialogue in i/o tables).
-    pub fn is_session_synced(&self, workspace: &str, source: &str, session_id: &str) -> Result<bool> {
+    pub fn is_session_synced(
+        &self,
+        workspace: &str,
+        source: &str,
+        session_id: &str,
+    ) -> Result<bool> {
         let sessions = self.list_sessions(workspace, source)?;
-        Ok(sessions.iter().any(|s| s.id == session_id && s.dialogue_count > 0))
+        Ok(sessions
+            .iter()
+            .any(|s| s.id == session_id && s.dialogue_count > 0))
     }
 
     /// Count total dialogues across all synced sessions for a workspace+source.
@@ -148,7 +155,6 @@ fn classify_agent_block(block: &AgentBlock) -> (&'static str, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::ai::{AgentBlock, AgentBlockKind};
     use crate::history::HistoryStore;
 

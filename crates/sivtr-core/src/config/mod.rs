@@ -170,6 +170,11 @@ impl SivtrConfig {
     /// macOS:   ~/Library/Application Support/sivtr/config.toml
     /// Linux:   ~/.config/sivtr/config.toml
     pub fn config_path() -> Result<PathBuf> {
+        // Allow tests to override the config path via env var
+        if let Ok(path) = std::env::var("SIVTR_CONFIG") {
+            return Ok(PathBuf::from(path));
+        }
+
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
         let current = config_dir.join("sivtr").join("config.toml");

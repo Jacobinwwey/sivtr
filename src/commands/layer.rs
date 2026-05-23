@@ -46,9 +46,12 @@ pub fn execute(cmd: LayerCommand) -> Result<()> {
             args.limit,
             &args.output,
         ),
-        LayerAction::Tree(args) => {
-            show_tree(&store, &resolve_workspace(args.workspace)?, args.depth, &args.output)
-        }
+        LayerAction::Tree(args) => show_tree(
+            &store,
+            &resolve_workspace(args.workspace)?,
+            args.depth,
+            &args.output,
+        ),
         LayerAction::Show(args) => show_entry(&store, &args.table, args.id),
     }
 }
@@ -138,7 +141,10 @@ fn emit_lines(lines: &[Line], flags: &LayerOutputFlags) {
                 preview: flags.content.then(|| l.content_preview.clone()).flatten(),
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_default()
+        );
         return;
     }
 
@@ -211,7 +217,10 @@ fn list_sources(store: &HistoryStore, workspace: &str, flags: &LayerOutputFlags)
         .map(|(i, src)| Line {
             seq: i + 1,
             ref_: src.name.to_string(),
-            summary: format!("{} sessions, {} dialogues", src.session_count, src.dialogue_count),
+            summary: format!(
+                "{} sessions, {} dialogues",
+                src.session_count, src.dialogue_count
+            ),
             timestamp: Some(src.last_active.clone()),
             content_preview: None,
         })
@@ -356,7 +365,14 @@ fn query_layer(
             if all_lines.len() >= limit {
                 break;
             }
-            let preview: String = entry.content.lines().next().unwrap_or("").chars().take(80).collect();
+            let preview: String = entry
+                .content
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect();
             all_lines.push(Line {
                 seq: 0,
                 ref_: format!(
@@ -383,7 +399,14 @@ fn query_layer(
             if all_lines.len() >= limit {
                 break;
             }
-            let preview: String = entry.content.lines().next().unwrap_or("").chars().take(80).collect();
+            let preview: String = entry
+                .content
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect();
             all_lines.push(Line {
                 seq: 0,
                 ref_: format!(
@@ -431,7 +454,11 @@ fn show_tree(
     let sources = store.list_sources(workspace)?;
     for (src_idx, src) in sources.iter().enumerate() {
         let is_last_src = src_idx == sources.len() - 1;
-        let src_prefix = if is_last_src { "└── " } else { "├── " };
+        let src_prefix = if is_last_src {
+            "└── "
+        } else {
+            "├── "
+        };
         let src_cont = if is_last_src { "    " } else { "│   " };
         let src_label = if flags.numbers {
             format!("{}. {}/", src_idx + 1, src.name)
@@ -445,10 +472,18 @@ fn show_tree(
         }
 
         let sessions = store.list_sessions(workspace, &src.name)?;
-        let session_limit = if depth < 4 { 5.min(sessions.len()) } else { sessions.len() };
+        let session_limit = if depth < 4 {
+            5.min(sessions.len())
+        } else {
+            sessions.len()
+        };
         for (sess_idx, sess) in sessions.iter().take(session_limit).enumerate() {
             let is_last_sess = sess_idx == session_limit - 1;
-            let sess_prefix = if is_last_sess { "└── " } else { "├── " };
+            let sess_prefix = if is_last_sess {
+                "└── "
+            } else {
+                "├── "
+            };
             let sess_cont = if is_last_sess { "    " } else { "│   " };
             let ts_str = if flags.timestamps {
                 format!("  {} -> {}", ts(&sess.first_at), ts(&sess.last_at))
@@ -466,10 +501,18 @@ fn show_tree(
             }
 
             let dialogues = store.list_dialogues(workspace, &src.name, &sess.id)?;
-            let dlg_limit = if depth < 5 { 3.min(dialogues.len()) } else { dialogues.len() };
+            let dlg_limit = if depth < 5 {
+                3.min(dialogues.len())
+            } else {
+                dialogues.len()
+            };
             for (dlg_idx, dlg) in dialogues.iter().take(dlg_limit).enumerate() {
                 let is_last_dlg = dlg_idx == dlg_limit - 1;
-                let dlg_prefix = if is_last_dlg { "└── " } else { "├── " };
+                let dlg_prefix = if is_last_dlg {
+                    "└── "
+                } else {
+                    "├── "
+                };
                 let dlg_cont = if is_last_dlg { "    " } else { "│   " };
                 let ts_str = if flags.timestamps {
                     format!("  {}", ts(&dlg.first_at))
@@ -496,8 +539,14 @@ fn show_tree(
                 let inputs = store.list_dialogue_inputs(&path)?;
                 let outputs = store.list_dialogue_outputs(&path)?;
                 for (ci, input) in inputs.iter().enumerate() {
-                    let preview: String =
-                        input.content.lines().next().unwrap_or("").chars().take(60).collect();
+                    let preview: String = input
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(60)
+                        .collect();
                     println!(
                         "{src_cont}{sess_cont}{dlg_cont}├── i:{} [{}] {preview}",
                         ci + 1,
@@ -505,8 +554,14 @@ fn show_tree(
                     );
                 }
                 for (ci, output) in outputs.iter().enumerate() {
-                    let preview: String =
-                        output.content.lines().next().unwrap_or("").chars().take(60).collect();
+                    let preview: String = output
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(60)
+                        .collect();
                     println!(
                         "{src_cont}{sess_cont}{dlg_cont}├── o:{} [{}] {preview}",
                         ci + 1,
@@ -587,10 +642,7 @@ fn sync_agent_sessions(
             .unwrap_or_else(|| info.path.to_string_lossy().to_string());
 
         // Use the session's own CWD as workspace, fall back to "unknown"
-        let workspace = info
-            .cwd
-            .as_deref()
-            .unwrap_or("unknown");
+        let workspace = info.cwd.as_deref().unwrap_or("unknown");
 
         if store.is_session_synced(workspace, source_name, &session_id)? {
             continue;

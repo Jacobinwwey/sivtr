@@ -124,11 +124,9 @@ impl HistoryStore {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::history::store::CaptureSource;
+    use crate::history::store::{CaptureSource, HistoryStore};
 
     #[test]
     fn test_insert_and_list() {

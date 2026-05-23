@@ -231,7 +231,12 @@ impl HistoryStore {
         )?;
         let entries = stmt
             .query_map(
-                rusqlite::params![path.workspace, path.source, path.session_id, path.dialogue_id],
+                rusqlite::params![
+                    path.workspace,
+                    path.source,
+                    path.session_id,
+                    path.dialogue_id
+                ],
                 map_input_row,
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -372,7 +377,12 @@ impl HistoryStore {
         )?;
         let entries = stmt
             .query_map(
-                rusqlite::params![path.workspace, path.source, path.session_id, path.dialogue_id],
+                rusqlite::params![
+                    path.workspace,
+                    path.source,
+                    path.session_id,
+                    path.dialogue_id
+                ],
                 map_output_row,
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -490,18 +500,15 @@ impl HistoryStore {
              ORDER BY last_at DESC",
         )?;
         let mut entries: Vec<DialogueInfo> = stmt
-            .query_map(
-                rusqlite::params![workspace, source, session_id],
-                |row| {
-                    Ok(DialogueInfo {
-                        id: row.get(0)?,
-                        input_count: row.get(1)?,
-                        output_count: row.get(2)?,
-                        first_at: row.get(3)?,
-                        last_at: row.get(4)?,
-                    })
-                },
-            )?
+            .query_map(rusqlite::params![workspace, source, session_id], |row| {
+                Ok(DialogueInfo {
+                    id: row.get(0)?,
+                    input_count: row.get(1)?,
+                    output_count: row.get(2)?,
+                    first_at: row.get(3)?,
+                    last_at: row.get(4)?,
+                })
+            })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         // Merge output counts
@@ -512,10 +519,9 @@ impl HistoryStore {
              GROUP BY dialogue_id",
         )?;
         let output_counts: Vec<(String, i64)> = output_stmt
-            .query_map(
-                rusqlite::params![workspace, source, session_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
+            .query_map(rusqlite::params![workspace, source, session_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         for entry in &mut entries {
