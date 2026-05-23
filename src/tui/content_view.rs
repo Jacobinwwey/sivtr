@@ -97,14 +97,11 @@ pub(crate) fn render_content_view(
         view.mode,
     );
     frame.render_widget(
-        Paragraph::new(line_number_lines(total_lines, scroll, &visible))
+        Paragraph::new(line_number_lines(total_lines, scroll, visible.len()))
             .alignment(Alignment::Right),
         chunks[0],
     );
-    frame.render_widget(
-        Paragraph::new(separator_lines(visible_height, &visible)),
-        chunks[1],
-    );
+    frame.render_widget(Paragraph::new(separator_lines(visible_height)), chunks[1]);
     frame.render_widget(
         Paragraph::new(content_lines(
             visible,
@@ -942,40 +939,29 @@ fn text_width(text: &str) -> usize {
     text.chars().map(char_width).sum()
 }
 
-fn line_number_lines(total_lines: usize, scroll: usize, visible: &[ContentLine]) -> Text<'static> {
-    let lines = (scroll..total_lines.min(scroll.saturating_add(visible.len())))
-        .enumerate()
-        .map(|(visible_idx, idx)| {
-            Line::from(Span::styled(
-                (idx + 1).to_string(),
-                gutter_style(visible.get(visible_idx).map(|line| line.kind)),
-            ))
-        })
+fn line_number_lines(total_lines: usize, scroll: usize, visible_len: usize) -> Text<'static> {
+    let lines = (scroll..total_lines.min(scroll.saturating_add(visible_len)))
+        .map(|idx| Line::from(Span::styled((idx + 1).to_string(), line_number_style())))
         .collect::<Vec<_>>();
     Text::from(lines)
 }
 
-fn separator_lines(height: usize, visible: &[ContentLine]) -> Text<'static> {
+fn separator_lines(height: usize) -> Text<'static> {
     Text::from(
         (0..height)
-            .map(|idx| {
-                Line::from(Span::styled(
-                    "|",
-                    gutter_style(visible.get(idx).map(|line| line.kind)),
-                ))
-            })
+            .map(|_| Line::from(Span::styled("|", separator_style())))
             .collect::<Vec<_>>(),
     )
 }
 
-fn gutter_style(kind: Option<MarkdownLineKind>) -> Style {
-    match kind {
-        Some(MarkdownLineKind::CodeBlock | MarkdownLineKind::CodeFence) => {
-            Style::default().fg(Color::Blue)
-        }
-        Some(MarkdownLineKind::Table) => Style::default().fg(Color::DarkGray),
-        _ => Style::default().fg(Color::DarkGray),
-    }
+fn line_number_style() -> Style {
+    Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn separator_style() -> Style {
+    Style::default().fg(Color::DarkGray)
 }
 
 fn styled_content_line(line: Line<'static>, search_regex: Option<&Regex>) -> Line<'static> {
@@ -1131,12 +1117,16 @@ fn raw_lines(text: &str) -> Vec<&str> {
 mod tests {
     use super::{
         content_lines, content_link_at, content_position_at, content_position_in_text_row,
-        line_count, line_number_width, selected_content_text, visible_content_lines,
-        ContentPosition, ContentSelection, ContentSelectionKind, ContentViewMode,
+        line_count, line_number_width, render_content_view, selected_content_text,
+        visible_content_lines, ContentPosition, ContentSelection, ContentSelectionKind,
+        ContentView, ContentViewMode,
     };
+    use crate::tui::pane::Panel;
+    use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
     use ratatui::prelude::{Color, Modifier};
     use ratatui::text::Text;
+    use ratatui::Terminal;
     use regex::Regex;
     use unicode_width::UnicodeWidthStr;
 
@@ -1163,6 +1153,28 @@ mod tests {
             .collect::<String>()
     }
 
+    fn render_content_buffer(text: &str, mode: ContentViewMode) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_content_view(
+                    frame,
+                    Rect::new(0, 0, 40, 6),
+                    Panel::new("3", "Content", true),
+                    ContentView {
+                        text,
+                        scroll: 0,
+                        search_regex: None,
+                        mode,
+                        selection: None,
+                    },
+                );
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
     #[test]
     fn counts_empty_content_as_one_display_line() {
         assert_eq!(line_count(""), 1);
@@ -1173,6 +1185,17 @@ mod tests {
         assert_eq!(line_number_width(9), 1);
         assert_eq!(line_number_width(10), 2);
         assert_eq!(line_number_width(100), 3);
+    }
+
+    #[test]
+    fn content_view_renders_visible_line_numbers_in_gutter() {
+        let buffer = render_content_buffer("alpha\nbeta", ContentViewMode::Reading);
+
+        assert_eq!(buffer[(2, 1)].symbol(), "1");
+        assert_eq!(buffer[(2, 1)].fg, Color::Gray);
+        assert!(buffer[(2, 1)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buffer[(2, 2)].symbol(), "2");
+        assert_eq!(buffer[(2, 2)].fg, Color::Gray);
     }
 
     #[test]
