@@ -93,7 +93,7 @@ impl WorkspaceSearchIndex {
         let mut session_entries = Vec::with_capacity(loaded_sessions.len());
         let dialogue_count = loaded_sessions
             .iter()
-            .map(|(_, session)| session.dialogue_titles.len())
+            .map(|(_, session)| session.records.len())
             .sum();
         let mut dialogue_entries = Vec::with_capacity(dialogue_count);
 
@@ -103,17 +103,14 @@ impl WorkspaceSearchIndex {
                 session_title: session.search_title.clone(),
             });
 
-            for (dialogue_index, (dialogue_title, unit)) in session
-                .dialogue_titles
-                .iter()
-                .zip(session.units.iter())
-                .enumerate()
-            {
+            for (dialogue_index, record) in session.records.iter().enumerate() {
                 dialogue_entries.push(WorkspaceSearchDialogueEntry {
                     session_index,
                     dialogue_index,
-                    dialogue_title: dialogue_title.clone(),
-                    content: unit.plain.clone(),
+                    dialogue_title: record.title.clone(),
+                    content: record
+                        .copy_text(sivtr_core::record::RecordTextMode::Combined, false)
+                        .plain,
                 });
             }
         }
@@ -204,10 +201,10 @@ impl WorkspaceSearchIndex {
             .enumerate()
             .flat_map(|(session_index, session)| {
                 session
-                    .dialogue_titles
+                    .records
                     .iter()
                     .enumerate()
-                    .filter(|(_, title)| regex.is_match(title))
+                    .filter(|(_, record)| regex.is_match(&record.title))
                     .map(move |(dialogue_index, _)| WorkspaceSearchMatch {
                         session_index,
                         dialogue_index,
@@ -254,11 +251,13 @@ impl WorkspaceSearchIndex {
             .enumerate()
             .flat_map(|(session_index, session)| {
                 session
-                    .units
+                    .records
                     .iter()
                     .enumerate()
-                    .flat_map(move |(dialogue_index, unit)| {
-                        unit.plain
+                    .flat_map(move |(dialogue_index, record)| {
+                        record
+                            .copy_text(sivtr_core::record::RecordTextMode::Combined, false)
+                            .plain
                             .lines()
                             .enumerate()
                             .filter(|(_, line)| regex.is_match(line))
@@ -267,6 +266,7 @@ impl WorkspaceSearchIndex {
                                 dialogue_index,
                                 line_index,
                             })
+                            .collect::<Vec<_>>()
                     })
             })
             .collect();
@@ -279,31 +279,9 @@ fn filter_workspace_session_dialogues(
     dialogue_indices: &[usize],
 ) -> WorkspaceSession {
     let mut filtered = session.clone();
-    filtered.dialogue_titles = dialogue_indices
+    filtered.records = dialogue_indices
         .iter()
-        .filter_map(|idx| session.dialogue_titles.get(*idx).cloned())
-        .collect();
-    filtered.units = dialogue_indices
-        .iter()
-        .filter_map(|idx| session.units.get(*idx).cloned())
-        .collect();
-    filtered.copy_units = dialogue_indices
-        .iter()
-        .filter_map(|idx| session.copy_units.get(*idx).cloned())
-        .collect();
-    filtered.unit_timestamps = dialogue_indices
-        .iter()
-        .filter_map(|idx| session.unit_timestamps.get(*idx).cloned())
-        .collect();
-    filtered.original_dialogue_indices = dialogue_indices
-        .iter()
-        .map(|idx| {
-            session
-                .original_dialogue_indices
-                .get(*idx)
-                .copied()
-                .unwrap_or(*idx)
-        })
+        .filter_map(|idx| session.records.get(*idx).cloned())
         .collect();
     filtered
 }

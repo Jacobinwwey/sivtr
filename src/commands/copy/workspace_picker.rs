@@ -25,7 +25,7 @@ use crate::tui::workspace_search::{
 use super::vim::{open_vim_view, VimBlock, VimView};
 use super::{
     filter_lines_by_spec, load_workspace_session_at, load_workspace_sessions_for_indices,
-    PICK_CANCELLED_MESSAGE,
+    record_text_to_pair, record_to_copy_parts, PICK_CANCELLED_MESSAGE,
 };
 
 const MOUSE_SCROLL_LINES: usize = 3;
@@ -2040,23 +2040,14 @@ pub(super) fn workspace_dialogues_for_sessions(
         .into_iter()
         .filter_map(|idx| sessions.get(idx))
         .flat_map(|session| {
-            session
-                .dialogue_titles
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(move |(idx, title)| {
-                    let unit = session.units.get(idx).cloned().unwrap_or_default();
-                    let copy = session.copy_units.get(idx).cloned().unwrap_or_else(|| {
-                        crate::tui::workspace::WorkspaceCopyParts::from_block(unit.clone())
-                    });
-                    WorkspaceDialogue {
-                        source: session.source,
-                        title,
-                        unit,
-                        copy,
-                    }
-                })
+            session.records.iter().map(move |record| WorkspaceDialogue {
+                source: session.source,
+                title: record.title.clone(),
+                unit: record_text_to_pair(
+                    record.copy_text(sivtr_core::record::RecordTextMode::Combined, false),
+                ),
+                copy: record_to_copy_parts(record, sivtr_core::ai::AgentSelection::LastTurn),
+            })
         })
         .collect()
 }
@@ -2282,6 +2273,11 @@ mod tests {
     };
     use crossterm::event::KeyCode;
     use sivtr_core::ai::AgentProvider;
+    use sivtr_core::record::WorkRef;
+    use sivtr_core::record::{
+        ChatMessage, WorkChannel, WorkOutcome, WorkPayload, WorkRecord, WorkRecordKind,
+        WorkSessionRef, WorkSource, WorkStatus, WorkText, WorkTime, RECORD_SCHEMA_VERSION,
+    };
     use std::time::SystemTime;
 
     #[test]
@@ -2360,8 +2356,11 @@ mod tests {
             WorkspaceSource::Agent(AgentProvider::Claude)
         );
         assert_eq!(output.sessions[0].title, "target session");
-        assert_eq!(output.sessions[0].dialogue_titles, vec!["lighting"]);
-        assert_eq!(output.sessions[0].units[0].plain, "target session:lighting");
+        assert_eq!(output.sessions[0].records[0].title, "lighting");
+        assert_eq!(
+            output.sessions[0].records[0].text.combined,
+            "target session:lighting"
+        );
         assert_eq!(output.matches.len(), 1);
     }
 
@@ -2389,7 +2388,11 @@ mod tests {
         assert_eq!(session_results.sessions.len(), 1);
         assert_eq!(dialogue_results.sessions.len(), 1);
         assert_eq!(
-            dialogue_results.sessions[0].dialogue_titles,
+            dialogue_results.sessions[0]
+                .records
+                .iter()
+                .map(|record| record.title.as_str())
+                .collect::<Vec<_>>(),
             vec!["lighting notes"]
         );
         assert!(content_results.sessions.is_empty());
@@ -2446,9 +2449,9 @@ mod tests {
 
         assert_eq!(output.sessions.len(), 2);
         assert_eq!(output.sessions[0].title, "codex session");
-        assert_eq!(output.sessions[0].dialogue_titles, vec!["needle first"]);
+        assert_eq!(output.sessions[0].records[0].title, "needle first");
         assert_eq!(output.sessions[1].title, "claude session");
-        assert_eq!(output.sessions[1].dialogue_titles, vec!["needle dialogue"]);
+        assert_eq!(output.sessions[1].records[0].title, "needle dialogue");
         assert_eq!(output.matches.len(), 2);
     }
 
@@ -2459,17 +2462,12 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH,
             title: "session".to_string(),
             search_title: "session".to_string(),
-            units: vec![TextPair {
-                plain: "first\nneedle one\nmiddle\nneedle two".to_string(),
-                ansi: String::new(),
-            }],
-            copy_units: vec![WorkspaceCopyParts::from_block(TextPair {
-                plain: "first\nneedle one\nmiddle\nneedle two".to_string(),
-                ansi: String::new(),
-            })],
-            dialogue_titles: vec!["dialogue".to_string()],
-            unit_timestamps: vec![None],
-            original_dialogue_indices: vec![0],
+            records: vec![workspace_test_record(
+                WorkspaceSource::Agent(AgentProvider::Codex),
+                "dialogue",
+                "first\nneedle one\nmiddle\nneedle two",
+                0,
+            )],
             load: None,
         }];
 
@@ -2751,29 +2749,70 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH,
             title: title.to_string(),
             search_title: title.to_string(),
-            units: dialogue_titles
+            records: dialogue_titles
                 .iter()
-                .map(|dialogue_title| TextPair {
-                    plain: format!("{title}:{dialogue_title}"),
-                    ansi: format!("{title}:{dialogue_title}"),
+                .enumerate()
+                .map(|(idx, dialogue_title)| {
+                    workspace_test_record(
+                        source,
+                        dialogue_title,
+                        &format!("{title}:{dialogue_title}"),
+                        idx,
+                    )
                 })
                 .collect(),
-            copy_units: dialogue_titles
-                .iter()
-                .map(|dialogue_title| {
-                    WorkspaceCopyParts::from_block(TextPair {
-                        plain: format!("{title}:{dialogue_title}"),
-                        ansi: format!("{title}:{dialogue_title}"),
-                    })
-                })
-                .collect(),
-            dialogue_titles: dialogue_titles
-                .iter()
-                .map(|dialogue_title| dialogue_title.to_string())
-                .collect(),
-            unit_timestamps: vec![None; dialogue_titles.len()],
-            original_dialogue_indices: (0..dialogue_titles.len()).collect(),
             load: None,
+        }
+    }
+
+    fn workspace_test_record(
+        source: WorkspaceSource,
+        title: &str,
+        plain: &str,
+        index: usize,
+    ) -> WorkRecord {
+        let (channel, provider) = match source {
+            WorkspaceSource::Terminal => (WorkChannel::Terminal, None),
+            WorkspaceSource::Agent(provider) => {
+                (WorkChannel::Chat, Some(provider.command_name().to_string()))
+            }
+        };
+        let work_ref = match source {
+            WorkspaceSource::Terminal => WorkRef::terminal_record("test", index + 1),
+            WorkspaceSource::Agent(provider) => WorkRef::agent_record(provider, "test", index + 1),
+        };
+        WorkRecord {
+            schema_version: RECORD_SCHEMA_VERSION,
+            id: work_ref.to_string(),
+            kind: WorkRecordKind::ChatTurn,
+            source: WorkSource { channel, provider },
+            session: WorkSessionRef {
+                id: "test".to_string(),
+                path: None,
+                index,
+                work_ref,
+            },
+            cwd: None,
+            time: WorkTime::default(),
+            status: WorkStatus {
+                outcome: WorkOutcome::Unknown,
+                exit_code: None,
+            },
+            title: title.to_string(),
+            text: WorkText {
+                input: Some(plain.to_string()),
+                output: None,
+                combined: plain.to_string(),
+            },
+            payload: WorkPayload::ChatTurn {
+                user: plain.to_string(),
+                assistant: String::new(),
+                messages: vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: plain.to_string(),
+                    timestamp: None,
+                }],
+            },
         }
     }
 

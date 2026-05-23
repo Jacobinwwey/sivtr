@@ -8,9 +8,7 @@ use sivtr_core::ai::{
     AgentSessionProvider,
 };
 use sivtr_core::capture::scrollback;
-use sivtr_core::record::{
-    is_real_user_block, RecordText, RecordTextMode, WorkRecord, WorkRecordCopyParts,
-};
+use sivtr_core::record::{is_real_user_block, RecordTextMode, WorkRecord};
 use sivtr_core::session::{self, SessionEntry};
 
 mod vim;
@@ -515,11 +513,7 @@ fn build_lazy_agent_session_choice(
         modified: info.modified,
         title,
         search_title,
-        units: Vec::new(),
-        copy_units: Vec::new(),
-        dialogue_titles: vec!["<loading: press Enter or select a session>".to_string()],
-        unit_timestamps: vec![None],
-        original_dialogue_indices: Vec::new(),
+        records: Vec::new(),
         load: Some(WorkspaceSessionLoad {
             provider,
             path: info.path,
@@ -591,34 +585,19 @@ fn build_agent_session_choice(
     selection_mode: AgentSelection,
 ) -> Option<WorkspaceSession> {
     let records = WorkRecord::selected_chat_records(source.provider(), &session, selection_mode);
-    let units = records_to_text_pairs(&records);
-    let copy_units = records_to_copy_parts(&records, selection_mode);
-    if session.blocks.is_empty() || units.is_empty() {
+    if session.blocks.is_empty() || records.is_empty() {
         return None;
     }
 
     let title = agent_session_display_title(info, &session);
     let search_title = agent_session_search_title(info, &session);
-    let dialogue_titles = units
-        .iter()
-        .map(|unit| build_text_preview(&unit.plain))
-        .collect();
-    let unit_timestamps = records
-        .iter()
-        .map(|record| record.time.occurred_at.clone())
-        .collect();
-    let original_dialogue_indices = (0..units.len()).collect();
 
     Some(WorkspaceSession {
         source: WorkspaceSource::Agent(source.provider()),
         modified: info.modified,
         title,
         search_title,
-        units,
-        copy_units,
-        dialogue_titles,
-        unit_timestamps,
-        original_dialogue_indices,
+        records,
         load: None,
     })
 }
@@ -709,62 +688,28 @@ fn build_terminal_workspace_session(
     prompt_override: Option<&str>,
     modified: SystemTime,
 ) -> Option<WorkspaceSession> {
-    let entries = blocks
+    let records = blocks
         .iter()
         .filter_map(|block| {
             let unit = format_block_pair(block, mode, include_prompt, prompt_override);
-            if unit.plain.trim().is_empty() {
-                return None;
-            }
-
-            let copy = terminal_workspace_copy_parts(block, include_prompt, prompt_override);
-            let title = build_text_preview(&block.record.title);
-            Some((unit, copy, title, block.record.time.occurred_at.clone()))
+            (!unit.plain.trim().is_empty()).then(|| block.record.clone())
         })
         .collect::<Vec<_>>();
 
-    if entries.is_empty() {
+    if records.is_empty() {
         return None;
     }
 
-    let mut units = Vec::with_capacity(entries.len());
-    let mut copy_units = Vec::with_capacity(entries.len());
-    let mut dialogue_titles = Vec::with_capacity(entries.len());
-    let mut unit_timestamps = Vec::with_capacity(entries.len());
-    let mut original_dialogue_indices = Vec::with_capacity(entries.len());
-    for (idx, (unit, copy, title, timestamp)) in entries.into_iter().enumerate() {
-        units.push(unit);
-        copy_units.push(copy);
-        dialogue_titles.push(title);
-        unit_timestamps.push(timestamp);
-        original_dialogue_indices.push(idx);
-    }
-    let block_count = dialogue_titles.len();
+    let block_count = records.len();
     let title = format!("current shell  [{block_count} blocks]");
     Some(WorkspaceSession {
         source: WorkspaceSource::Terminal,
         modified,
         search_title: title.clone(),
         title,
-        units,
-        copy_units,
-        dialogue_titles,
-        unit_timestamps,
-        original_dialogue_indices,
+        records,
         load: None,
     })
-}
-
-fn terminal_workspace_copy_parts(
-    block: &IndexedCommandBlock,
-    include_prompt: bool,
-    prompt_override: Option<&str>,
-) -> WorkspaceCopyParts {
-    work_copy_parts_to_workspace(
-        block
-            .record
-            .copy_parts_with_prompt(include_prompt, prompt_override),
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1182,35 +1127,30 @@ fn records_to_text_pairs(records: &[WorkRecord]) -> Vec<TextPair> {
         .collect()
 }
 
-fn records_to_copy_parts(
-    records: &[WorkRecord],
+pub(crate) fn record_to_copy_parts(
+    record: &WorkRecord,
     selection_mode: AgentSelection,
-) -> Vec<WorkspaceCopyParts> {
-    records
-        .iter()
-        .map(|record| record_to_copy_parts(record, selection_mode))
-        .collect()
-}
-
-fn record_to_copy_parts(record: &WorkRecord, selection_mode: AgentSelection) -> WorkspaceCopyParts {
+) -> WorkspaceCopyParts {
     match selection_mode {
         AgentSelection::LastBlocks(_) | AgentSelection::All => WorkspaceCopyParts::from_block(
             record_text_to_pair(record.copy_text(RecordTextMode::Combined, false)),
         ),
-        _ => work_copy_parts_to_workspace(record.copy_parts(false)),
+        _ => WorkspaceCopyParts::from(record.copy_parts(false)),
     }
 }
 
-fn work_copy_parts_to_workspace(parts: WorkRecordCopyParts) -> WorkspaceCopyParts {
-    WorkspaceCopyParts {
-        input: record_text_to_pair(parts.input),
-        output: record_text_to_pair(parts.output),
-        block: record_text_to_pair(parts.block),
-        command: record_text_to_pair(parts.command),
+impl From<sivtr_core::record::WorkRecordCopyParts> for WorkspaceCopyParts {
+    fn from(parts: sivtr_core::record::WorkRecordCopyParts) -> Self {
+        WorkspaceCopyParts {
+            input: record_text_to_pair(parts.input),
+            output: record_text_to_pair(parts.output),
+            block: record_text_to_pair(parts.block),
+            command: record_text_to_pair(parts.command),
+        }
     }
 }
 
-fn record_text_to_pair(text: RecordText) -> TextPair {
+pub(crate) fn record_text_to_pair(text: sivtr_core::record::RecordText) -> TextPair {
     let ansi = text.ansi.unwrap_or_else(|| text.plain.clone());
     TextPair {
         plain: text.plain,
@@ -1225,16 +1165,6 @@ fn record_text_mode(mode: CopyMode) -> RecordTextMode {
         CopyMode::OutputOnly => RecordTextMode::Output,
         CopyMode::CommandOnly => RecordTextMode::Command,
     }
-}
-
-pub(super) fn build_text_preview(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("## "))
-        .unwrap_or("<empty>")
-        .chars()
-        .take(80)
-        .collect()
 }
 
 #[cfg(test)]

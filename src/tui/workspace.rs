@@ -17,6 +17,7 @@ use crate::tui::pane::{
 };
 use crate::tui::workspace_search::{workspace_search_regex_for_query, WorkspaceSearchScope};
 use sivtr_core::ai::{AgentProvider, AgentSelection};
+use sivtr_core::record::WorkRecord;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WorkspaceSource {
@@ -95,11 +96,7 @@ pub(crate) struct WorkspaceSession {
     pub(crate) modified: SystemTime,
     pub(crate) title: String,
     pub(crate) search_title: String,
-    pub(crate) units: Vec<TextPair>,
-    pub(crate) copy_units: Vec<WorkspaceCopyParts>,
-    pub(crate) dialogue_titles: Vec<String>,
-    pub(crate) unit_timestamps: Vec<Option<String>>,
-    pub(crate) original_dialogue_indices: Vec<usize>,
+    pub(crate) records: Vec<WorkRecord>,
     pub(crate) load: Option<WorkspaceSessionLoad>,
 }
 
