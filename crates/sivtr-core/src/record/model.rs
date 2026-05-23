@@ -1,3 +1,4 @@
+use super::refs::WorkRef;
 use crate::ai::{format_blocks, AgentBlock, AgentBlockKind, AgentProvider, AgentSession};
 use crate::session::SessionEntry;
 use serde::Serialize;
@@ -40,7 +41,7 @@ pub struct WorkSessionRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub index: usize,
-    pub ref_id: String,
+    pub work_ref: WorkRef,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -120,7 +121,8 @@ impl WorkRecord {
             return None;
         }
 
-        let ref_id = format!("terminal/current/{}", index + 1);
+        let work_ref = WorkRef::terminal_record("current", index + 1);
+        let ref_id = work_ref.to_string();
         let session_id = session_path
             .file_stem()
             .and_then(|name| name.to_str())
@@ -150,7 +152,7 @@ impl WorkRecord {
                 id: session_id,
                 path: Some(session_path.display().to_string()),
                 index,
-                ref_id: ref_id.clone(),
+                work_ref,
             },
             cwd: non_empty(entry.cwd.clone()),
             time: WorkTime {
@@ -225,7 +227,8 @@ impl WorkRecord {
         }
 
         let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
-        let ref_id = format!("{}/{}/{}", provider.command_name(), session_ref, index + 1);
+        let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
+        let ref_id = work_ref.to_string();
         let combined = format_blocks(blocks);
         let title = if user.trim().is_empty() {
             preview(&assistant)
@@ -246,7 +249,7 @@ impl WorkRecord {
                 id: session_ref,
                 path: Some(session.path.display().to_string()),
                 index,
-                ref_id: ref_id.clone(),
+                work_ref,
             },
             cwd: non_empty(session.cwd.clone()),
             time: WorkTime {

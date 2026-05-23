@@ -1,11 +1,19 @@
 use anyhow::{Context, Result};
 use sivtr_core::ai::AgentProvider;
 use sivtr_core::capture::scrollback;
-use sivtr_core::record::WorkRecord;
+use sivtr_core::record::{WorkRecord, WorkRecordIndex};
 use sivtr_core::session;
 use std::path::Path;
 
-pub(crate) fn current_work_records(
+pub(crate) fn current_work_record_index(
+    providers: &[AgentProvider],
+    cwd: &Path,
+    recent_sessions: Option<usize>,
+) -> Result<WorkRecordIndex> {
+    current_work_records(providers, cwd, recent_sessions).map(WorkRecordIndex::new)
+}
+
+fn current_work_records(
     providers: &[AgentProvider],
     cwd: &Path,
     recent_sessions: Option<usize>,
