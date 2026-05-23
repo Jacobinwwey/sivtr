@@ -3,9 +3,10 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::ai::{
-    extract_content_text, list_recent_jsonl_sessions, parse_jsonl_meta, parse_jsonl_session,
-    pretty_json_value, push_block, AgentBlockKind, AgentProvider, AgentSession, AgentSessionInfo,
-    AgentSessionMeta, AgentSessionProvider,
+    dedup_paths, discover_user_relative_paths, extract_content_text,
+    list_recent_jsonl_sessions_from_roots, parse_jsonl_meta, parse_jsonl_session,
+    pretty_json_value, push_block, split_env_path_list, AgentBlockKind, AgentProvider,
+    AgentSession, AgentSessionInfo, AgentSessionMeta, AgentSessionProvider,
 };
 
 const PROVIDER_NAME: &str = "Pi";
@@ -19,7 +20,7 @@ impl AgentSessionProvider for PiProvider {
     }
 
     fn list_recent_sessions(&self, cwd: Option<&Path>) -> Result<Vec<AgentSessionInfo>> {
-        list_recent_jsonl_sessions(&pi_sessions_dir(), cwd, parse_session_meta)
+        list_recent_jsonl_sessions_from_roots(configured_pi_session_dirs(), cwd, parse_session_meta)
     }
 
     fn parse_session_file(&self, path: &Path) -> Result<AgentSession> {
@@ -39,6 +40,15 @@ pub fn pi_home() -> PathBuf {
 
 pub fn pi_sessions_dir() -> PathBuf {
     pi_home().join("agent").join("sessions")
+}
+
+pub fn configured_pi_session_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![pi_sessions_dir()];
+    dirs.extend(split_env_path_list("SIVTR_PI_SESSION_DIRS"));
+    dirs.extend(discover_user_relative_paths(
+        Path::new(".pi").join("agent").join("sessions").as_path(),
+    ));
+    dedup_paths(dirs)
 }
 
 fn parse_session_meta(path: &Path) -> Result<AgentSessionMeta> {

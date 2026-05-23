@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -206,29 +207,39 @@ pub fn list_recent_jsonl_sessions(
     cwd: Option<&Path>,
     parse_meta: impl Fn(&Path) -> Result<AgentSessionMeta>,
 ) -> Result<Vec<AgentSessionInfo>> {
+    list_recent_jsonl_sessions_from_roots([root.to_path_buf()], cwd, parse_meta)
+}
+
+pub fn list_recent_jsonl_sessions_from_roots(
+    roots: impl IntoIterator<Item = PathBuf>,
+    cwd: Option<&Path>,
+    parse_meta: impl Fn(&Path) -> Result<AgentSessionMeta>,
+) -> Result<Vec<AgentSessionInfo>> {
     let wanted = cwd.map(normalize_path_for_match);
     let mut sessions = Vec::new();
 
-    for path in jsonl_files(root)? {
-        let meta = parse_meta(&path)?;
-        if let Some(wanted) = wanted.as_deref() {
-            let matches_cwd = meta
-                .cwd
-                .as_deref()
-                .map(|cwd| normalize_path_for_match(Path::new(cwd)) == wanted)
-                .unwrap_or(false);
-            if !matches_cwd {
-                continue;
+    for root in dedup_paths(roots.into_iter().collect()) {
+        for path in jsonl_files(&root)? {
+            let meta = parse_meta(&path)?;
+            if let Some(wanted) = wanted.as_deref() {
+                let matches_cwd = meta
+                    .cwd
+                    .as_deref()
+                    .map(|cwd| normalize_path_for_match(Path::new(cwd)) == wanted)
+                    .unwrap_or(false);
+                if !matches_cwd {
+                    continue;
+                }
             }
-        }
 
-        sessions.push(AgentSessionInfo {
-            modified: modified_time(&path).unwrap_or(SystemTime::UNIX_EPOCH),
-            path,
-            id: meta.id,
-            cwd: meta.cwd,
-            title: meta.title,
-        });
+            sessions.push(AgentSessionInfo {
+                modified: modified_time(&path).unwrap_or(SystemTime::UNIX_EPOCH),
+                path,
+                id: meta.id,
+                cwd: meta.cwd,
+                title: meta.title,
+            });
+        }
     }
 
     sessions.sort_by_key(|session| session.modified);
@@ -411,8 +422,106 @@ pub fn normalize_path_for_match(path: &Path) -> String {
         .to_lowercase()
 }
 
+pub fn split_env_path_list(name: &str) -> Vec<PathBuf> {
+    let separator = if cfg!(windows) { ';' } else { ':' };
+
+    std::env::var(name)
+        .ok()
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(separator)
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !seen.insert(normalize_path_for_match(&path)) {
+            continue;
+        }
+        deduped.push(path);
+    }
+    deduped
+}
+
+pub fn discover_user_relative_paths(relative: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(relative));
+    }
+
+    for base in discovery_home_bases() {
+        let Ok(entries) = fs::read_dir(&base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let home = entry.path();
+            if !home.is_dir() {
+                continue;
+            }
+            candidates.push(home.join(relative));
+        }
+    }
+
+    dedup_paths(candidates)
+        .into_iter()
+        .filter(|path| {
+            fs::metadata(path)
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false)
+                && fs::read_dir(path).is_ok()
+        })
+        .collect()
+}
+
+fn discovery_home_bases() -> Vec<PathBuf> {
+    let configured = split_env_path_list("SIVTR_DISCOVER_HOME_BASES");
+    if !configured.is_empty() {
+        return dedup_paths(configured);
+    }
+
+    let mut bases = Vec::new();
+
+    if let Some(home) = dirs::home_dir().and_then(|home| home.parent().map(Path::to_path_buf)) {
+        bases.push(home);
+    }
+
+    #[cfg(unix)]
+    {
+        bases.push(PathBuf::from("/home"));
+        bases.push(PathBuf::from("/Users"));
+    }
+
+    dedup_paths(bases)
+}
+
 fn is_trailing_partial_json_line(error: &serde_json::Error) -> bool {
     matches!(error.classify(), serde_json::error::Category::Eof)
+}
+
+pub fn is_meaningful_user_block(block: &AgentBlock) -> bool {
+    block.kind == AgentBlockKind::User && !is_noise_user_text(block.text.trim_start())
+}
+
+pub fn is_noise_user_text(text: &str) -> bool {
+    text.starts_with("# AGENTS.md instructions for")
+        || text.starts_with("<environment_context>")
+        || text.starts_with("<turn_aborted>")
+        || text.starts_with("<local-command-caveat>")
+        || text.starts_with("<local-command-stdout>")
+        || text.starts_with("<command-message>")
+        || text.starts_with("<command-name>")
+        || text.starts_with("<command-args>")
+        || text.starts_with("<ide_opened_file>")
+        || text.starts_with("[Request interrupted by user]")
 }
 
 pub fn select_blocks(session: &AgentSession, selection: AgentSelection) -> Vec<AgentBlock> {

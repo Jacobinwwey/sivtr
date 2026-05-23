@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::layer::LayerPath;
 use super::store::HistoryStore;
-use crate::ai::{AgentBlock, AgentBlockKind, AgentSession};
+use crate::ai::{is_meaningful_user_block, AgentBlock, AgentBlockKind, AgentSession};
 
 impl HistoryStore {
     /// Sync a terminal command+output pair into i/o tables.
@@ -78,7 +78,11 @@ impl HistoryStore {
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
             let mut has_content = false;
-            for block in dlg {
+            for block in dlg
+                .iter()
+                .copied()
+                .filter(|block| !skip_synced_agent_block(block))
+            {
                 let (content_type, is_input) = classify_agent_block(block);
                 if is_input {
                     self.insert_input(&path, &block.text, content_type, &timestamp)?;
@@ -123,24 +127,53 @@ impl HistoryStore {
 fn split_agent_dialogues(blocks: &[AgentBlock]) -> Vec<Vec<&AgentBlock>> {
     let mut dialogues: Vec<Vec<&AgentBlock>> = Vec::new();
     let mut current: Vec<&AgentBlock> = Vec::new();
-    let mut seen_assistant = false;
+    let mut seen_response = false;
 
     for block in blocks {
-        if block.kind == AgentBlockKind::User && seen_assistant && !current.is_empty() {
-            dialogues.push(std::mem::take(&mut current));
-            seen_assistant = false;
+        if block.kind == AgentBlockKind::User
+            && is_meaningful_user_block(block)
+            && seen_response
+            && !current.is_empty()
+        {
+            push_syncable_dialogue(&mut dialogues, std::mem::take(&mut current));
+            seen_response = false;
         }
-        if block.kind == AgentBlockKind::Assistant {
-            seen_assistant = true;
+        if matches!(
+            block.kind,
+            AgentBlockKind::Assistant | AgentBlockKind::ToolOutput
+        ) {
+            seen_response = true;
         }
         current.push(block);
     }
 
-    if !current.is_empty() {
-        dialogues.push(current);
-    }
+    push_syncable_dialogue(&mut dialogues, current);
 
     dialogues
+}
+
+fn push_syncable_dialogue<'a>(
+    dialogues: &mut Vec<Vec<&'a AgentBlock>>,
+    dialogue: Vec<&'a AgentBlock>,
+) {
+    if dialogue_is_syncable(&dialogue) {
+        dialogues.push(dialogue);
+    }
+}
+
+fn dialogue_is_syncable(dialogue: &[&AgentBlock]) -> bool {
+    let has_meaningful_user = dialogue.iter().any(|block| is_meaningful_user_block(block));
+    let has_response = dialogue.iter().any(|block| {
+        matches!(
+            block.kind,
+            AgentBlockKind::Assistant | AgentBlockKind::ToolOutput
+        )
+    });
+    has_meaningful_user && has_response
+}
+
+fn skip_synced_agent_block(block: &AgentBlock) -> bool {
+    block.kind == AgentBlockKind::User && !is_meaningful_user_block(block)
 }
 
 /// Classify an agent block into (content_type, is_input).
@@ -270,6 +303,48 @@ mod tests {
             .sync_agent_session("/repo", "claude", "abc", &session)
             .unwrap();
         assert_eq!(count2, 1); // same count, no duplicates
+    }
+
+    #[test]
+    fn sync_skips_trailing_local_command_noise_and_incomplete_turns() {
+        let store = HistoryStore::open_memory().unwrap();
+        let session = crate::ai::AgentSession {
+            path: "test.jsonl".into(),
+            id: Some("abc".to_string()),
+            cwd: Some("/repo".to_string()),
+            title: None,
+            blocks: vec![
+                make_block(AgentBlockKind::User, "real task"),
+                make_block(AgentBlockKind::Assistant, "done"),
+                make_block(
+                    AgentBlockKind::User,
+                    "<command-name>/exit</command-name>\n<command-message>exit</command-message>",
+                ),
+                make_block(
+                    AgentBlockKind::User,
+                    "<local-command-stdout>Goodbye!</local-command-stdout>",
+                ),
+                make_block(AgentBlockKind::User, "still typing"),
+            ],
+        };
+
+        let count = store
+            .sync_agent_session("/repo", "claude", "abc", &session)
+            .unwrap();
+
+        assert_eq!(count, 1);
+        let path = crate::history::layer::LayerPath {
+            workspace: "/repo".to_string(),
+            source: "claude".to_string(),
+            session_id: "abc".to_string(),
+            dialogue_id: "abc-0".to_string(),
+        };
+        let inputs = store.list_dialogue_inputs(&path).unwrap();
+        let outputs = store.list_dialogue_outputs(&path).unwrap();
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].content, "real task");
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].content, "done");
     }
 
     #[test]

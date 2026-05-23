@@ -3,9 +3,10 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::ai::{
-    extract_content_text, list_recent_jsonl_sessions, parse_jsonl_meta, parse_jsonl_session,
-    pretty_json_value, push_block, AgentBlockKind, AgentProvider, AgentSession, AgentSessionInfo,
-    AgentSessionMeta, AgentSessionProvider,
+    dedup_paths, discover_user_relative_paths, extract_content_text,
+    list_recent_jsonl_sessions_from_roots, parse_jsonl_meta, parse_jsonl_session,
+    pretty_json_value, push_block, split_env_path_list, AgentBlockKind, AgentProvider,
+    AgentSession, AgentSessionInfo, AgentSessionMeta, AgentSessionProvider,
 };
 
 const PROVIDER_NAME: &str = "Claude";
@@ -19,7 +20,11 @@ impl AgentSessionProvider for ClaudeProvider {
     }
 
     fn list_recent_sessions(&self, cwd: Option<&Path>) -> Result<Vec<AgentSessionInfo>> {
-        list_recent_jsonl_sessions(&claude_home().join("projects"), cwd, parse_session_meta)
+        list_recent_jsonl_sessions_from_roots(
+            configured_claude_projects_dirs(),
+            cwd,
+            parse_session_meta,
+        )
     }
 
     fn parse_session_file(&self, path: &Path) -> Result<AgentSession> {
@@ -35,6 +40,19 @@ pub fn claude_home() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".claude")
+}
+
+pub fn claude_projects_dir() -> PathBuf {
+    claude_home().join("projects")
+}
+
+pub fn configured_claude_projects_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![claude_projects_dir()];
+    dirs.extend(split_env_path_list("SIVTR_CLAUDE_PROJECT_DIRS"));
+    dirs.extend(discover_user_relative_paths(
+        Path::new(".claude").join("projects").as_path(),
+    ));
+    dedup_paths(dirs)
 }
 
 fn parse_session_meta(path: &Path) -> Result<AgentSessionMeta> {
@@ -350,10 +368,21 @@ fn tool_child_body(inner: &str, tool_kind: EmbeddedToolKind) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::ClaudeProvider;
+    use super::{configured_claude_projects_dirs, ClaudeProvider};
     use crate::ai::{
         format_blocks, select_blocks, AgentBlockKind, AgentSelection, AgentSessionProvider,
     };
+    use std::{
+        env, fs,
+        sync::{Mutex, OnceLock},
+    };
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn parses_claude_messages_and_tools() {
@@ -566,5 +595,91 @@ mod tests {
             format_blocks(&blocks),
             "## User\nsecond\n\n## Assistant\nnew"
         );
+    }
+
+    #[test]
+    fn configured_claude_project_dirs_include_explicit_extra_entries_once() {
+        let _guard = env_lock();
+        let previous = env::var_os("SIVTR_CLAUDE_PROJECT_DIRS");
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        env::set_var(
+            "SIVTR_CLAUDE_PROJECT_DIRS",
+            format!("/tmp/a{separator}/tmp/b{separator}/tmp/a"),
+        );
+
+        let dirs = configured_claude_projects_dirs();
+
+        match previous {
+            Some(value) => env::set_var("SIVTR_CLAUDE_PROJECT_DIRS", value),
+            None => env::remove_var("SIVTR_CLAUDE_PROJECT_DIRS"),
+        }
+
+        let matches = |expected: &str| {
+            let expected = crate::ai::normalize_path_for_match(std::path::Path::new(expected));
+            dirs.iter()
+                .filter(|path| crate::ai::normalize_path_for_match(path) == expected)
+                .count()
+        };
+        assert_eq!(matches("/tmp/a"), 1);
+        assert_eq!(matches("/tmp/b"), 1);
+    }
+
+    #[test]
+    fn list_recent_sessions_discovers_additional_home_roots() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let primary_home = temp.path().join("primary-home");
+        let shared_home = temp.path().join("shared-home");
+        let shared_projects = shared_home.join(".claude").join("projects");
+        fs::create_dir_all(primary_home.join(".claude").join("projects")).unwrap();
+        fs::create_dir_all(&shared_projects).unwrap();
+
+        let session_path = shared_projects.join("session.jsonl");
+        fs::write(
+            &session_path,
+            r#"{"type":"user","sessionId":"shared-session","cwd":"C:\\repo","message":{"role":"user","content":"hello"}}
+"#,
+        )
+        .unwrap();
+
+        let previous_home = env::var_os("HOME");
+        let previous_userprofile = env::var_os("USERPROFILE");
+        let previous_claude_home = env::var_os("CLAUDE_HOME");
+        let previous_bases = env::var_os("SIVTR_DISCOVER_HOME_BASES");
+        let previous_dirs = env::var_os("SIVTR_CLAUDE_PROJECT_DIRS");
+        env::set_var("HOME", &primary_home);
+        if cfg!(windows) {
+            env::set_var("USERPROFILE", &primary_home);
+        }
+        env::remove_var("CLAUDE_HOME");
+        env::remove_var("SIVTR_CLAUDE_PROJECT_DIRS");
+        env::set_var("SIVTR_DISCOVER_HOME_BASES", temp.path());
+
+        let sessions = ClaudeProvider.list_recent_sessions(None).unwrap();
+
+        match previous_home {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
+        match previous_claude_home {
+            Some(value) => env::set_var("CLAUDE_HOME", value),
+            None => env::remove_var("CLAUDE_HOME"),
+        }
+        match previous_bases {
+            Some(value) => env::set_var("SIVTR_DISCOVER_HOME_BASES", value),
+            None => env::remove_var("SIVTR_DISCOVER_HOME_BASES"),
+        }
+        match previous_dirs {
+            Some(value) => env::set_var("SIVTR_CLAUDE_PROJECT_DIRS", value),
+            None => env::remove_var("SIVTR_CLAUDE_PROJECT_DIRS"),
+        }
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.as_deref(), Some("shared-session"));
+        assert_eq!(sessions[0].path, session_path);
     }
 }

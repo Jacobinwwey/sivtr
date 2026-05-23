@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::layer::{
     DialogueInfo, InputEntry, LayerPath, OutputEntry, SessionInfo, SourceInfo, WorkspaceInfo,
@@ -42,6 +43,8 @@ pub struct HistoryStore {
     pub(crate) conn: Connection,
 }
 
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl HistoryStore {
     /// Open or create the history database at the default location.
     pub fn open_default() -> Result<Self> {
@@ -55,6 +58,7 @@ impl HistoryStore {
     /// Open or create the history database at a specific path.
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let conn = Connection::open(path)?;
+        configure_connection(&conn, true)?;
         schema::init_schema(&conn)?;
         Ok(Self { conn })
     }
@@ -62,6 +66,7 @@ impl HistoryStore {
     /// Open an in-memory database (for testing).
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        configure_connection(&conn, false)?;
         schema::init_schema(&conn)?;
         Ok(Self { conn })
     }
@@ -551,6 +556,14 @@ impl HistoryStore {
 
         Ok(current)
     }
+}
+
+fn configure_connection(conn: &Connection, persistent: bool) -> Result<()> {
+    conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+    if persistent {
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+    }
+    Ok(())
 }
 
 fn map_input_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputEntry> {

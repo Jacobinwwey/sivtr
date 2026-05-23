@@ -114,6 +114,7 @@ struct Line {
     summary: String,
     timestamp: Option<String>,
     content_preview: Option<String>,
+    sort_priority: u8,
 }
 
 #[derive(Serialize)]
@@ -157,7 +158,7 @@ fn emit_lines(lines: &[Line], flags: &LayerOutputFlags) {
         let ts = if flags.timestamps {
             line.timestamp
                 .as_deref()
-                .map(|t| format!("  {}", &t[..t.len().min(19)]))
+                .map(|t| format!("  {}", display_timestamp(t)))
                 .unwrap_or_default()
         } else {
             String::new()
@@ -174,6 +175,13 @@ fn emit_lines(lines: &[Line], flags: &LayerOutputFlags) {
 
 fn ts(t: &str) -> String {
     t.chars().take(19).collect()
+}
+
+fn display_timestamp(t: &str) -> String {
+    if t.contains(" -> ") {
+        return t.to_string();
+    }
+    ts(t)
 }
 
 // ── list commands ──
@@ -197,6 +205,7 @@ fn list_workspaces(store: &HistoryStore, flags: &LayerOutputFlags) -> Result<()>
             ),
             timestamp: Some(ws.last_active.clone()),
             content_preview: None,
+            sort_priority: 0,
         })
         .collect();
 
@@ -223,6 +232,7 @@ fn list_sources(store: &HistoryStore, workspace: &str, flags: &LayerOutputFlags)
             ),
             timestamp: Some(src.last_active.clone()),
             content_preview: None,
+            sort_priority: 0,
         })
         .collect();
 
@@ -249,8 +259,9 @@ fn list_sessions(
             seq: i + 1,
             ref_: ref_for_session(source, &sess.id),
             summary: format!("{} dialogues", sess.dialogue_count),
-            timestamp: Some(format!("{} -> {}", ts(&sess.first_at), ts(&sess.last_at))),
+            timestamp: Some(sess.last_at.clone()),
             content_preview: None,
+            sort_priority: 0,
         })
         .collect();
 
@@ -279,10 +290,11 @@ fn list_dialogues(
         .enumerate()
         .map(|(i, dlg)| Line {
             seq: i + 1,
-            ref_: ref_for_dialogue(source, session_id, &dlg.id),
+            ref_: ref_for_dialogue(source, &full_id, &dlg.id),
             summary: format!("{}i + {}o", dlg.input_count, dlg.output_count),
-            timestamp: Some(format!("{} -> {}", ts(&dlg.first_at), ts(&dlg.last_at))),
+            timestamp: Some(dlg.last_at.clone()),
             content_preview: None,
+            sort_priority: 0,
         })
         .collect();
 
@@ -300,17 +312,19 @@ fn show_content(
     dialogue_id: &str,
 ) -> Result<()> {
     let full_session_id = resolve_session_id(store, workspace, source, session_id)?;
+    let full_dialogue_id =
+        resolve_dialogue_id(store, workspace, source, &full_session_id, dialogue_id)?;
     let path = LayerPath {
         workspace: workspace.to_string(),
         source: source.to_string(),
         session_id: full_session_id.clone(),
-        dialogue_id: dialogue_id.to_string(),
+        dialogue_id: full_dialogue_id.clone(),
     };
 
     let inputs = store.list_dialogue_inputs(&path)?;
     let outputs = store.list_dialogue_outputs(&path)?;
 
-    let dlg_ref = ref_for_dialogue(source, &full_session_id, dialogue_id);
+    let dlg_ref = ref_for_dialogue(source, &full_session_id, &full_dialogue_id);
     println!("{dlg_ref}  {}i + {}o", inputs.len(), outputs.len());
 
     for (i, input) in inputs.iter().enumerate() {
@@ -334,6 +348,42 @@ fn show_content(
     }
 
     Ok(())
+}
+
+fn resolve_dialogue_id(
+    store: &HistoryStore,
+    workspace: &str,
+    source: &str,
+    session_id: &str,
+    dialogue_ref: &str,
+) -> Result<String> {
+    let dialogues = store.list_dialogues(workspace, source, session_id)?;
+
+    if dialogues.iter().any(|dialogue| dialogue.id == dialogue_ref) {
+        return Ok(dialogue_ref.to_string());
+    }
+
+    if let Some(dialogue) = dialogues
+        .iter()
+        .find(|dialogue| dialogue.id.starts_with(dialogue_ref))
+    {
+        return Ok(dialogue.id.clone());
+    }
+
+    if let Ok(index) = dialogue_ref.parse::<usize>() {
+        if index == 0 {
+            anyhow::bail!("Dialogue selectors are 1-based. Use `1` for the newest dialogue.");
+        }
+        if let Some(dialogue) = dialogues.get(index - 1) {
+            return Ok(dialogue.id.clone());
+        }
+    }
+
+    anyhow::bail!(
+        "No dialogue matching `{dialogue_ref}` in `{workspace}/{source}/{}`.\nRun `sivtr layer dialogues {source} {}` -w {workspace} -n to list dialogues.",
+        session_ref(session_id),
+        session_ref(session_id)
+    )
 }
 
 // ── query ──
@@ -384,6 +434,7 @@ fn query_layer(
                 summary: format!("i [{}] {}", entry.content_type, preview),
                 timestamp: Some(entry.timestamp.clone()),
                 content_preview: Some(preview),
+                sort_priority: line_priority(true, &entry.content_type),
             });
         }
     }
@@ -418,9 +469,17 @@ fn query_layer(
                 summary: format!("o [{}] {}", entry.content_type, preview),
                 timestamp: Some(entry.timestamp.clone()),
                 content_preview: Some(preview),
+                sort_priority: line_priority(false, &entry.content_type),
             });
         }
     }
+
+    all_lines.sort_by(|left, right| {
+        left.sort_priority
+            .cmp(&right.sort_priority)
+            .then_with(|| right.timestamp.cmp(&left.timestamp))
+            .then_with(|| left.ref_.cmp(&right.ref_))
+    });
 
     // Assign sequence numbers after merging
     for (i, line) in all_lines.iter_mut().enumerate() {
@@ -434,6 +493,18 @@ fn query_layer(
 
     emit_lines(&all_lines, flags);
     Ok(())
+}
+
+fn line_priority(is_input: bool, content_type: &str) -> u8 {
+    match (is_input, content_type) {
+        (_, "message") => 0,
+        (false, "text") => 1,
+        (true, "command" | "prompt") => 2,
+        (false, "error") => 3,
+        (false, "tool_output") => 4,
+        (true, "tool_call") => 5,
+        _ => 6,
+    }
 }
 
 // ── tree ──
@@ -708,4 +779,65 @@ fn show_entry(store: &HistoryStore, table: &str, id: i64) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{display_timestamp, line_priority, resolve_dialogue_id};
+    use sivtr_core::history::HistoryStore;
+
+    #[test]
+    fn display_timestamp_keeps_ranges_and_trims_rfc3339_values() {
+        assert_eq!(
+            display_timestamp("2026-05-23T08:52:27Z"),
+            "2026-05-23T08:52:27"
+        );
+        assert_eq!(
+            display_timestamp("2026-05-23T08:10:01 -> 2026-05-23T08:52:27"),
+            "2026-05-23T08:10:01 -> 2026-05-23T08:52:27"
+        );
+    }
+
+    #[test]
+    fn resolve_dialogue_id_accepts_sequence_numbers() {
+        let store = HistoryStore::open_memory().unwrap();
+        store
+            .insert_input(
+                &sivtr_core::history::layer::LayerPath {
+                    workspace: "/repo".to_string(),
+                    source: "claude".to_string(),
+                    session_id: "abc".to_string(),
+                    dialogue_id: "abc-older".to_string(),
+                },
+                "older",
+                "message",
+                "2026-05-23T08:10:01Z",
+            )
+            .unwrap();
+        store
+            .insert_input(
+                &sivtr_core::history::layer::LayerPath {
+                    workspace: "/repo".to_string(),
+                    source: "claude".to_string(),
+                    session_id: "abc".to_string(),
+                    dialogue_id: "abc-newer".to_string(),
+                },
+                "newer",
+                "message",
+                "2026-05-23T08:52:27Z",
+            )
+            .unwrap();
+
+        let newest = resolve_dialogue_id(&store, "/repo", "claude", "abc", "1").unwrap();
+        let older = resolve_dialogue_id(&store, "/repo", "claude", "abc", "2").unwrap();
+
+        assert_eq!(newest, "abc-newer");
+        assert_eq!(older, "abc-older");
+    }
+
+    #[test]
+    fn line_priority_prefers_messages_over_tool_scaffolding() {
+        assert!(line_priority(true, "message") < line_priority(true, "tool_call"));
+        assert!(line_priority(false, "message") < line_priority(false, "tool_output"));
+    }
 }

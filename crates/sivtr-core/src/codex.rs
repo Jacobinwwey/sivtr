@@ -1,14 +1,13 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::ai::{
-    extract_content_text, jsonl_files, list_recent_jsonl_sessions, normalize_path_for_match,
-    parse_jsonl_meta, parse_jsonl_session, pretty_json_string, pretty_json_value, push_block,
-    AgentBlockKind, AgentProvider, AgentSession, AgentSessionInfo, AgentSessionMeta,
-    AgentSessionProvider,
+    dedup_paths, discover_user_relative_paths, extract_content_text, jsonl_files,
+    normalize_path_for_match, parse_jsonl_meta, parse_jsonl_session, pretty_json_string,
+    pretty_json_value, push_block, split_env_path_list, AgentBlockKind, AgentProvider,
+    AgentSession, AgentSessionInfo, AgentSessionMeta, AgentSessionProvider,
 };
 use crate::config::SivtrConfig;
 
@@ -132,17 +131,18 @@ impl AgentSessionProvider for CodexProvider {
     }
 
     fn find_session_by_id(&self, id: &str) -> Result<Option<PathBuf>> {
-        for path in local_session_files()? {
-            if path
+        for session in self.list_recent_sessions(None)? {
+            if session
+                .path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.contains(id))
             {
-                return Ok(Some(path));
+                return Ok(Some(session.path));
             }
 
-            if parse_session_meta(&path)?.id.as_deref() == Some(id) {
-                return Ok(Some(path));
+            if session.id.as_deref() == Some(id) {
+                return Ok(Some(session.path));
             }
         }
 
@@ -154,11 +154,12 @@ impl AgentSessionProvider for CodexProvider {
             return Ok(Some(path));
         }
 
-        if let Some(session) = list_recent_local_sessions(Some(cwd))?.into_iter().next() {
+        if let Some(session) = self.list_recent_sessions(Some(cwd))?.into_iter().next() {
             return Ok(Some(session.path));
         }
 
-        Ok(list_recent_local_sessions(None)?
+        Ok(self
+            .list_recent_sessions(None)?
             .into_iter()
             .next()
             .map(|session| session.path))
@@ -186,16 +187,10 @@ pub fn configured_codex_session_dirs() -> Vec<PathBuf> {
         dirs.extend(config.codex.session_dirs);
     }
 
-    if let Ok(extra) = std::env::var("SIVTR_CODEX_SESSION_DIRS") {
-        let separator = if cfg!(windows) { ';' } else { ':' };
-        dirs.extend(
-            extra
-                .split(separator)
-                .map(str::trim)
-                .filter(|entry| !entry.is_empty())
-                .map(PathBuf::from),
-        );
-    }
+    dirs.extend(split_env_path_list("SIVTR_CODEX_SESSION_DIRS"));
+    dirs.extend(discover_user_relative_paths(
+        Path::new(".codex").join("sessions").as_path(),
+    ));
 
     dedup_paths(dirs)
 }
@@ -318,14 +313,6 @@ fn extract_tool_call_text(payload: &Value) -> String {
     }
 }
 
-fn local_session_files() -> Result<Vec<PathBuf>> {
-    jsonl_files(&local_codex_sessions_dir())
-}
-
-fn list_recent_local_sessions(cwd: Option<&Path>) -> Result<Vec<AgentSessionInfo>> {
-    list_recent_jsonl_sessions(&local_codex_sessions_dir(), cwd, parse_session_meta)
-}
-
 fn find_current_thread_session() -> Result<Option<PathBuf>> {
     let Ok(thread_id) = std::env::var("CODEX_THREAD_ID") else {
         return Ok(None);
@@ -337,18 +324,6 @@ fn find_current_thread_session() -> Result<Option<PathBuf>> {
     }
 
     CodexProvider.find_session_by_id(thread_id)
-}
-
-fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut deduped = Vec::new();
-    for path in paths {
-        if !seen.insert(normalize_path_for_match(&path)) {
-            continue;
-        }
-        deduped.push(path);
-    }
-    deduped
 }
 
 #[cfg(test)]
@@ -647,6 +622,7 @@ mod tests {
     fn list_recent_sessions_includes_exported_session_dirs() {
         let _guard = env_lock();
         let temp = tempfile::tempdir().unwrap();
+        let primary_home = temp.path().join("primary-home");
         let codex_home = temp.path().join("codex-home");
         let local_sessions = codex_home
             .join("sessions")
@@ -688,17 +664,35 @@ mod tests {
         )
         .unwrap();
 
+        fs::create_dir_all(&primary_home).unwrap();
+
+        let previous_home = env::var_os("HOME");
+        let previous_userprofile = env::var_os("USERPROFILE");
         let previous_codex_home = env::var_os("CODEX_HOME");
         let previous_dirs = env::var_os("SIVTR_CODEX_SESSION_DIRS");
+        let previous_bases = env::var_os("SIVTR_DISCOVER_HOME_BASES");
         let previous_config = env::var_os("SIVTR_CONFIG");
         let empty_config = temp.path().join("empty-config.toml");
         std::fs::write(&empty_config, "").unwrap();
+        env::set_var("HOME", &primary_home);
+        if cfg!(windows) {
+            env::set_var("USERPROFILE", &primary_home);
+        }
         env::set_var("CODEX_HOME", &codex_home);
         env::set_var("SIVTR_CODEX_SESSION_DIRS", exported_root.join("sessions"));
+        env::set_var("SIVTR_DISCOVER_HOME_BASES", temp.path());
         env::set_var("SIVTR_CONFIG", &empty_config);
 
         let sessions = CodexProvider.list_recent_sessions(None).unwrap();
 
+        match previous_home {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
         match previous_codex_home {
             Some(value) => env::set_var("CODEX_HOME", value),
             None => env::remove_var("CODEX_HOME"),
@@ -706,6 +700,10 @@ mod tests {
         match previous_dirs {
             Some(value) => env::set_var("SIVTR_CODEX_SESSION_DIRS", value),
             None => env::remove_var("SIVTR_CODEX_SESSION_DIRS"),
+        }
+        match previous_bases {
+            Some(value) => env::set_var("SIVTR_DISCOVER_HOME_BASES", value),
+            None => env::remove_var("SIVTR_DISCOVER_HOME_BASES"),
         }
         match previous_config {
             Some(value) => env::set_var("SIVTR_CONFIG", value),
@@ -717,6 +715,194 @@ mod tests {
         assert_eq!(sessions[1].id.as_deref(), Some("local-session"));
         assert_eq!(sessions[0].path, exported_path);
         assert_eq!(sessions[1].path, local_path);
+    }
+
+    #[test]
+    fn list_recent_sessions_discovers_additional_home_roots() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let primary_home = temp.path().join("primary-home");
+        let shared_home = temp.path().join("shared-home");
+        let primary_sessions = primary_home.join(".codex").join("sessions");
+        let shared_sessions = shared_home
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("23");
+        fs::create_dir_all(&primary_sessions).unwrap();
+        fs::create_dir_all(&shared_sessions).unwrap();
+
+        let shared_session = shared_sessions.join("shared-thread.jsonl");
+        fs::write(
+            &shared_session,
+            format!(
+                "{}\n",
+                serde_json::to_string(&json!({
+                    "type": "session_meta",
+                    "payload": { "id": "shared-thread", "cwd": "/tmp/shared-repo" }
+                }))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        let empty_config = temp.path().join("empty-config.toml");
+        fs::write(&empty_config, "").unwrap();
+
+        let previous_home = env::var_os("HOME");
+        let previous_userprofile = env::var_os("USERPROFILE");
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        let previous_bases = env::var_os("SIVTR_DISCOVER_HOME_BASES");
+        let previous_dirs = env::var_os("SIVTR_CODEX_SESSION_DIRS");
+        let previous_config = env::var_os("SIVTR_CONFIG");
+        env::set_var("HOME", &primary_home);
+        if cfg!(windows) {
+            env::set_var("USERPROFILE", &primary_home);
+        }
+        env::remove_var("CODEX_HOME");
+        env::remove_var("SIVTR_CODEX_SESSION_DIRS");
+        env::set_var("SIVTR_DISCOVER_HOME_BASES", temp.path());
+        env::set_var("SIVTR_CONFIG", &empty_config);
+
+        let sessions = CodexProvider.list_recent_sessions(None).unwrap();
+
+        match previous_home {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
+        match previous_codex_home {
+            Some(value) => env::set_var("CODEX_HOME", value),
+            None => env::remove_var("CODEX_HOME"),
+        }
+        match previous_bases {
+            Some(value) => env::set_var("SIVTR_DISCOVER_HOME_BASES", value),
+            None => env::remove_var("SIVTR_DISCOVER_HOME_BASES"),
+        }
+        match previous_dirs {
+            Some(value) => env::set_var("SIVTR_CODEX_SESSION_DIRS", value),
+            None => env::remove_var("SIVTR_CODEX_SESSION_DIRS"),
+        }
+        match previous_config {
+            Some(value) => env::set_var("SIVTR_CONFIG", value),
+            None => env::remove_var("SIVTR_CONFIG"),
+        }
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.as_deref(), Some("shared-thread"));
+        assert_eq!(sessions[0].path, shared_session);
+    }
+
+    #[test]
+    fn find_current_session_uses_thread_id_from_discovered_home_root() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let primary_home = temp.path().join("primary-home");
+        let shared_home = temp.path().join("shared-home");
+        let primary_sessions = primary_home
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("23");
+        let shared_sessions = shared_home
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("23");
+        fs::create_dir_all(&primary_sessions).unwrap();
+        fs::create_dir_all(&shared_sessions).unwrap();
+
+        let cwd_match = temp.path().join("cwd-match");
+        fs::create_dir_all(&cwd_match).unwrap();
+
+        let local_session = primary_sessions.join("rollout-local.jsonl");
+        fs::write(
+            &local_session,
+            format!(
+                "{}\n",
+                serde_json::to_string(&json!({
+                    "type": "session_meta",
+                    "payload": { "id": "local-session", "cwd": cwd_match }
+                }))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        let shared_session = shared_sessions.join("rollout-shared.jsonl");
+        fs::write(
+            &shared_session,
+            format!(
+                "{}\n",
+                serde_json::to_string(&json!({
+                    "type": "session_meta",
+                    "payload": { "id": "shared-thread", "cwd": "/tmp/shared-repo" }
+                }))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        let empty_config = temp.path().join("empty-config.toml");
+        fs::write(&empty_config, "").unwrap();
+
+        let previous_home = env::var_os("HOME");
+        let previous_userprofile = env::var_os("USERPROFILE");
+        let previous_codex_home = env::var_os("CODEX_HOME");
+        let previous_thread_id = env::var_os("CODEX_THREAD_ID");
+        let previous_bases = env::var_os("SIVTR_DISCOVER_HOME_BASES");
+        let previous_dirs = env::var_os("SIVTR_CODEX_SESSION_DIRS");
+        let previous_config = env::var_os("SIVTR_CONFIG");
+        env::set_var("HOME", &primary_home);
+        if cfg!(windows) {
+            env::set_var("USERPROFILE", &primary_home);
+        }
+        env::remove_var("CODEX_HOME");
+        env::set_var("CODEX_THREAD_ID", "shared-thread");
+        env::remove_var("SIVTR_CODEX_SESSION_DIRS");
+        env::set_var("SIVTR_DISCOVER_HOME_BASES", temp.path());
+        env::set_var("SIVTR_CONFIG", &empty_config);
+
+        let resolved = CodexProvider.find_current_session(&cwd_match).unwrap();
+
+        match previous_home {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
+        match previous_codex_home {
+            Some(value) => env::set_var("CODEX_HOME", value),
+            None => env::remove_var("CODEX_HOME"),
+        }
+        match previous_thread_id {
+            Some(value) => env::set_var("CODEX_THREAD_ID", value),
+            None => env::remove_var("CODEX_THREAD_ID"),
+        }
+        match previous_bases {
+            Some(value) => env::set_var("SIVTR_DISCOVER_HOME_BASES", value),
+            None => env::remove_var("SIVTR_DISCOVER_HOME_BASES"),
+        }
+        match previous_dirs {
+            Some(value) => env::set_var("SIVTR_CODEX_SESSION_DIRS", value),
+            None => env::remove_var("SIVTR_CODEX_SESSION_DIRS"),
+        }
+        match previous_config {
+            Some(value) => env::set_var("SIVTR_CONFIG", value),
+            None => env::remove_var("SIVTR_CONFIG"),
+        }
+
+        assert_eq!(resolved, Some(shared_session));
     }
 
     #[test]

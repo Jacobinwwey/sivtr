@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use crate::command_blocks::ParsedCommandBlock as CommandBlock;
 use crate::commands::command_block_selector::{parse_selector, resolve_selector, CommandSelection};
 use sivtr_core::ai::{
-    format_blocks, select_blocks, AgentBlock, AgentBlockKind, AgentProvider, AgentSelection,
-    AgentSession, AgentSessionInfo, AgentSessionProvider,
+    format_blocks, is_meaningful_user_block, select_blocks, AgentBlock, AgentBlockKind,
+    AgentProvider, AgentSelection, AgentSession, AgentSessionInfo, AgentSessionProvider,
 };
 use sivtr_core::capture::scrollback;
 use sivtr_core::history::HistoryStore;
@@ -1047,16 +1047,24 @@ fn finish_copy(text: String, print_full: bool, success_message: String) -> Resul
         return Ok(());
     }
 
-    sivtr_core::export::clipboard::copy_to_clipboard(&text)?;
-
     if print_full {
         for line in text.lines() {
             eprintln!("  {line}");
         }
     }
 
-    eprintln!("{success_message}");
-    Ok(())
+    match sivtr_core::export::clipboard::copy_to_clipboard(&text) {
+        Ok(()) => {
+            eprintln!("{success_message}");
+            Ok(())
+        }
+        Err(error) if print_full => {
+            eprintln!("sivtr: clipboard unavailable, printed output only");
+            eprintln!("  detail: {error:#}");
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn resolve_agent_session_path(
@@ -1311,24 +1319,7 @@ fn agent_session_ref_id(id: Option<&str>, path: &std::path::Path) -> String {
 }
 
 fn is_real_user_block(block: &AgentBlock) -> bool {
-    if block.kind != AgentBlockKind::User {
-        return false;
-    }
-
-    let text = block.text.trim_start();
-    !is_agent_startup_user_text(text)
-}
-
-fn is_agent_startup_user_text(text: &str) -> bool {
-    text.starts_with("# AGENTS.md instructions for")
-        || text.starts_with("<environment_context>")
-        || text.starts_with("<turn_aborted>")
-        || text.starts_with("<local-command-caveat>")
-        || text.starts_with("<local-command-stdout>")
-        || text.starts_with("<command-message>")
-        || text.starts_with("<command-name>")
-        || text.starts_with("<ide_opened_file>")
-        || text.starts_with("[Request interrupted by user]")
+    is_meaningful_user_block(block)
 }
 
 fn preview_line(text: &str, limit: usize) -> Option<String> {
@@ -1437,6 +1428,7 @@ fn build_agent_kind_copy_units(
         .blocks
         .iter()
         .filter(|block| block.kind == kind)
+        .filter(|block| kind != AgentBlockKind::User || is_real_user_block(block))
         .map(|block| {
             let text = block.text.trim().to_string();
             let text_pair = plain_text_pair(text.clone());
@@ -1505,6 +1497,7 @@ fn build_agent_kind_units(session: &AgentSession, kind: AgentBlockKind) -> Vec<T
         .blocks
         .iter()
         .filter(|block| block.kind == kind)
+        .filter(|block| kind != AgentBlockKind::User || is_real_user_block(block))
         .map(|block| TextPair {
             plain: block.text.clone(),
             ansi: String::new(),
