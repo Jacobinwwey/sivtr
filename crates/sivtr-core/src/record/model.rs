@@ -7,6 +7,72 @@ use crate::session::SessionEntry;
 use serde::Serialize;
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordTextMode {
+    Combined,
+    Input,
+    Output,
+    Command,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordText {
+    pub plain: String,
+    pub ansi: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkRecordCopyParts {
+    pub input: RecordText,
+    pub output: RecordText,
+    pub block: RecordText,
+    pub command: RecordText,
+}
+
+impl Default for RecordText {
+    fn default() -> Self {
+        Self::plain(String::new())
+    }
+}
+
+impl RecordText {
+    pub fn plain(plain: String) -> Self {
+        Self { plain, ansi: None }
+    }
+
+    pub fn with_ansi(plain: String, ansi: String) -> Self {
+        Self {
+            plain,
+            ansi: Some(ansi),
+        }
+    }
+
+    pub fn rendered(&self, ansi: bool) -> &str {
+        if ansi {
+            self.ansi.as_deref().unwrap_or(&self.plain)
+        } else {
+            &self.plain
+        }
+    }
+}
+
+impl Default for WorkRecordCopyParts {
+    fn default() -> Self {
+        Self::from_block(RecordText::default())
+    }
+}
+
+impl WorkRecordCopyParts {
+    pub fn from_block(block: RecordText) -> Self {
+        Self {
+            input: block.clone(),
+            output: block.clone(),
+            block,
+            command: RecordText::default(),
+        }
+    }
+}
+
 pub const RECORD_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -303,6 +369,198 @@ impl WorkRecord {
             }
         }
     }
+
+    pub fn copy_text(&self, mode: RecordTextMode, include_prompt: bool) -> RecordText {
+        match &self.payload {
+            WorkPayload::TerminalCommand {
+                prompt,
+                command,
+                output,
+                prompt_ansi,
+                output_ansi,
+            } => terminal_record_text(
+                mode,
+                prompt,
+                command,
+                output,
+                prompt_ansi.as_deref(),
+                output_ansi.as_deref(),
+                include_prompt,
+                None,
+            ),
+            WorkPayload::ChatTurn { .. } => chat_record_text(self, mode),
+        }
+    }
+
+    pub fn copy_text_with_prompt(
+        &self,
+        mode: RecordTextMode,
+        include_prompt: bool,
+        prompt_override: Option<&str>,
+    ) -> RecordText {
+        match &self.payload {
+            WorkPayload::TerminalCommand {
+                prompt,
+                command,
+                output,
+                prompt_ansi,
+                output_ansi,
+            } => terminal_record_text(
+                mode,
+                prompt,
+                command,
+                output,
+                prompt_ansi.as_deref(),
+                output_ansi.as_deref(),
+                include_prompt,
+                prompt_override,
+            ),
+            WorkPayload::ChatTurn { .. } => chat_record_text(self, mode),
+        }
+    }
+
+    pub fn copy_parts(&self, include_prompt: bool) -> WorkRecordCopyParts {
+        self.copy_parts_with_prompt(include_prompt, None)
+    }
+
+    pub fn copy_parts_with_prompt(
+        &self,
+        include_prompt: bool,
+        prompt_override: Option<&str>,
+    ) -> WorkRecordCopyParts {
+        WorkRecordCopyParts {
+            input: self.copy_text_with_prompt(
+                RecordTextMode::Input,
+                include_prompt,
+                prompt_override,
+            ),
+            output: self.copy_text_with_prompt(
+                RecordTextMode::Output,
+                include_prompt,
+                prompt_override,
+            ),
+            block: self.copy_text_with_prompt(
+                RecordTextMode::Combined,
+                include_prompt,
+                prompt_override,
+            ),
+            command: self.copy_text_with_prompt(RecordTextMode::Command, false, None),
+        }
+    }
+}
+
+fn terminal_record_text(
+    mode: RecordTextMode,
+    prompt: &str,
+    command: &str,
+    output: &str,
+    prompt_ansi: Option<&str>,
+    output_ansi: Option<&str>,
+    include_prompt: bool,
+    prompt_override: Option<&str>,
+) -> RecordText {
+    match mode {
+        RecordTextMode::Combined => {
+            let input = terminal_input_text(
+                prompt,
+                command,
+                prompt_ansi,
+                include_prompt,
+                prompt_override,
+            );
+            let output_ansi = output_ansi.unwrap_or(output).to_string();
+            RecordText::with_ansi(
+                join_terminal_input_output(&input.plain, output),
+                join_terminal_input_output(input.rendered(true), &output_ansi),
+            )
+        }
+        RecordTextMode::Input => terminal_input_text(
+            prompt,
+            command,
+            prompt_ansi,
+            include_prompt,
+            prompt_override,
+        ),
+        RecordTextMode::Output => RecordText::with_ansi(
+            output.to_string(),
+            output_ansi.unwrap_or(output).to_string(),
+        ),
+        RecordTextMode::Command => RecordText::plain(command.to_string()),
+    }
+}
+
+fn join_terminal_input_output(input: &str, output: &str) -> String {
+    match (input.is_empty(), output.is_empty()) {
+        (false, false) => format!("{input}\n{output}"),
+        (false, true) => input.to_string(),
+        (true, false) => output.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
+fn terminal_input_text(
+    prompt: &str,
+    command: &str,
+    prompt_ansi: Option<&str>,
+    include_prompt: bool,
+    prompt_override: Option<&str>,
+) -> RecordText {
+    if !include_prompt {
+        return RecordText::plain(command.to_string());
+    }
+
+    let plain_prompt = render_input(prompt, command);
+    let ansi_prompt = render_input(prompt_ansi.unwrap_or(prompt), command);
+    let plain = match prompt_override {
+        Some(prompt_override) if !command.is_empty() => {
+            render_prompt_override(prompt_override, command)
+        }
+        Some(_) => plain_prompt.clone(),
+        None => plain_prompt.clone(),
+    };
+    let ansi = match prompt_override {
+        Some(prompt_override) if !command.is_empty() => {
+            render_prompt_override(prompt_override, command)
+        }
+        Some(_) => plain_prompt,
+        None => ansi_prompt,
+    };
+    RecordText::with_ansi(plain, ansi)
+}
+
+fn render_input(prompt: &str, command: &str) -> String {
+    match (prompt.trim_end().is_empty(), command.is_empty()) {
+        (false, false) => render_prompt_override(prompt, command),
+        (false, true) => prompt.trim_end_matches(['\r', '\n']).to_string(),
+        (true, false) => command.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
+fn render_prompt_override(prompt: &str, command: &str) -> String {
+    let prompt = prompt.trim_end_matches(['\r', '\n']);
+    if prompt.is_empty() {
+        return command.to_string();
+    }
+
+    if prompt.ends_with(' ') || prompt.ends_with('\t') {
+        format!("{prompt}{command}")
+    } else {
+        format!("{prompt} {command}")
+    }
+}
+
+fn chat_record_text(record: &WorkRecord, mode: RecordTextMode) -> RecordText {
+    let text = match mode {
+        RecordTextMode::Combined => join_nonempty([
+            record.text.input.as_deref().unwrap_or(""),
+            record.text.output.as_deref().unwrap_or(""),
+        ]),
+        RecordTextMode::Input => record.text.input.clone().unwrap_or_default(),
+        RecordTextMode::Output => record.text.output.clone().unwrap_or_default(),
+        RecordTextMode::Command => String::new(),
+    };
+    RecordText::plain(text)
 }
 
 fn selected_block_records(

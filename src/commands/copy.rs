@@ -2,14 +2,15 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use std::time::SystemTime;
 
-use crate::command_blocks::ParsedCommandBlock as CommandBlock;
 use crate::commands::command_block_selector::{parse_selector, resolve_selector, CommandSelection};
 use sivtr_core::ai::{
     AgentBlockKind, AgentProvider, AgentSelection, AgentSession, AgentSessionInfo,
     AgentSessionProvider,
 };
 use sivtr_core::capture::scrollback;
-use sivtr_core::record::{is_real_user_block, WorkRecord};
+use sivtr_core::record::{
+    is_real_user_block, RecordText, RecordTextMode, WorkRecord, WorkRecordCopyParts,
+};
 use sivtr_core::session::{self, SessionEntry};
 
 mod vim;
@@ -82,29 +83,13 @@ fn agent_session_providers(providers: &[AgentProvider]) -> Vec<Box<dyn AgentSess
 
 #[derive(Clone, Debug)]
 struct IndexedCommandBlock {
-    plain: CommandBlock,
-    ansi: Option<CommandBlock>,
-    ended_at: Option<String>,
+    record: WorkRecord,
 }
 
 impl IndexedCommandBlock {
-    fn from_session_entry(entry: &SessionEntry) -> Self {
-        let plain = CommandBlock::from_session_entry(entry);
-        let ansi = entry.has_ansi().then(|| CommandBlock {
-            input_with_prompt: entry.render_input_ansi(),
-            input_without_prompt: plain.input_without_prompt.clone(),
-            output: entry
-                .output_ansi
-                .clone()
-                .unwrap_or_else(|| plain.output.clone()),
-            command: plain.command.clone(),
-        });
-
-        Self {
-            plain,
-            ansi,
-            ended_at: entry.ended_at.clone(),
-        }
+    fn from_session_entry(entry: &SessionEntry, index: usize) -> Option<Self> {
+        WorkRecord::terminal(entry, std::path::Path::new("current"), index)
+            .map(|record| Self { record })
     }
 }
 
@@ -138,7 +123,8 @@ pub fn execute(request: CopyRequest<'_>) -> Result<()> {
 
     let blocks: Vec<IndexedCommandBlock> = entries
         .iter()
-        .map(IndexedCommandBlock::from_session_entry)
+        .enumerate()
+        .filter_map(|(index, entry)| IndexedCommandBlock::from_session_entry(entry, index))
         .collect();
 
     let total = blocks.len();
@@ -701,7 +687,8 @@ fn build_terminal_context_session() -> Result<Option<WorkspaceSession>> {
 
     let blocks = entries
         .iter()
-        .map(IndexedCommandBlock::from_session_entry)
+        .enumerate()
+        .filter_map(|(index, entry)| IndexedCommandBlock::from_session_entry(entry, index))
         .collect::<Vec<_>>();
     let modified = std::fs::metadata(&log_path)
         .and_then(|metadata| metadata.modified())
@@ -731,13 +718,8 @@ fn build_terminal_workspace_session(
             }
 
             let copy = terminal_workspace_copy_parts(block, include_prompt, prompt_override);
-            let input = block.plain.input_without_prompt.trim();
-            let title = if input.is_empty() {
-                build_text_preview(&block.plain.output)
-            } else {
-                build_text_preview(input)
-            };
-            Some((unit, copy, title, block.ended_at.clone()))
+            let title = build_text_preview(&block.record.title);
+            Some((unit, copy, title, block.record.time.occurred_at.clone()))
         })
         .collect::<Vec<_>>();
 
@@ -778,12 +760,11 @@ fn terminal_workspace_copy_parts(
     include_prompt: bool,
     prompt_override: Option<&str>,
 ) -> WorkspaceCopyParts {
-    WorkspaceCopyParts {
-        input: format_block_pair(block, CopyMode::InputOnly, include_prompt, prompt_override),
-        output: format_block_pair(block, CopyMode::OutputOnly, include_prompt, prompt_override),
-        block: format_block_pair(block, CopyMode::Both, include_prompt, prompt_override),
-        command: format_block_pair(block, CopyMode::CommandOnly, false, None),
-    }
+    work_copy_parts_to_workspace(
+        block
+            .record
+            .copy_parts_with_prompt(include_prompt, prompt_override),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -828,15 +809,11 @@ fn format_block_pair(
     include_prompt: bool,
     prompt_override: Option<&str>,
 ) -> TextPair {
-    let plain = format_block(&block.plain, mode, include_prompt, prompt_override);
-    let ansi = format_block(
-        block.ansi.as_ref().unwrap_or(&block.plain),
-        mode,
+    record_text_to_pair(block.record.copy_text_with_prompt(
+        record_text_mode(mode),
         include_prompt,
         prompt_override,
-    );
-
-    TextPair { plain, ansi }
+    ))
 }
 
 fn join_text_pairs(pairs: &[TextPair], separator: &str) -> TextPair {
@@ -851,59 +828,6 @@ fn join_text_pairs(pairs: &[TextPair], separator: &str) -> TextPair {
             .map(|pair| pair.ansi.as_str())
             .collect::<Vec<_>>()
             .join(separator),
-    }
-}
-
-fn format_block(
-    block: &CommandBlock,
-    mode: CopyMode,
-    include_prompt: bool,
-    prompt_override: Option<&str>,
-) -> String {
-    match mode {
-        CopyMode::Both => {
-            let input = if include_prompt {
-                format_input(block, prompt_override)
-            } else {
-                block.input_without_prompt.clone()
-            };
-            match (input.is_empty(), block.output.is_empty()) {
-                (false, false) => format!("{}\n{}", input, block.output),
-                (false, true) => input,
-                (true, false) => block.output.clone(),
-                (true, true) => String::new(),
-            }
-        }
-        CopyMode::InputOnly => {
-            if include_prompt {
-                format_input(block, prompt_override)
-            } else {
-                block.input_without_prompt.clone()
-            }
-        }
-        CopyMode::OutputOnly => block.output.clone(),
-        CopyMode::CommandOnly => block.command.clone(),
-    }
-}
-
-fn format_input(block: &CommandBlock, prompt_override: Option<&str>) -> String {
-    match prompt_override {
-        Some(prompt) if !block.command.is_empty() => render_prompt_override(prompt, &block.command),
-        Some(_) => block.input_with_prompt.clone(),
-        None => block.input_with_prompt.clone(),
-    }
-}
-
-fn render_prompt_override(prompt: &str, command: &str) -> String {
-    let prompt = prompt.trim_end_matches(['\r', '\n']);
-    if prompt.is_empty() {
-        return command.to_string();
-    }
-
-    if prompt.ends_with(' ') || prompt.ends_with('\t') {
-        format!("{prompt}{command}")
-    } else {
-        format!("{prompt} {command}")
     }
 }
 
@@ -1254,10 +1178,7 @@ fn preview_line(text: &str, limit: usize) -> Option<String> {
 fn records_to_text_pairs(records: &[WorkRecord]) -> Vec<TextPair> {
     records
         .iter()
-        .map(|record| TextPair {
-            plain: record.text.combined.clone(),
-            ansi: String::new(),
-        })
+        .map(|record| record_text_to_pair(record.copy_text(RecordTextMode::Combined, false)))
         .collect()
 }
 
@@ -1273,50 +1194,36 @@ fn records_to_copy_parts(
 
 fn record_to_copy_parts(record: &WorkRecord, selection_mode: AgentSelection) -> WorkspaceCopyParts {
     match selection_mode {
-        AgentSelection::LastTurn => WorkspaceCopyParts {
-            input: plain_text_pair(record.text.input.clone().unwrap_or_default()),
-            output: plain_text_pair(record.text.output.clone().unwrap_or_default()),
-            block: plain_text_pair(join_record_io(record)),
-            command: TextPair::default(),
-        },
-        AgentSelection::LastUser => WorkspaceCopyParts {
-            input: plain_text_pair(record.text.input.clone().unwrap_or_default()),
-            block: plain_text_pair(record.text.combined.clone()),
-            ..WorkspaceCopyParts::default()
-        },
-        AgentSelection::LastAssistant | AgentSelection::LastTool => WorkspaceCopyParts {
-            output: plain_text_pair(
-                record
-                    .text
-                    .output
-                    .clone()
-                    .unwrap_or_else(|| record.text.combined.clone()),
-            ),
-            block: plain_text_pair(record.text.combined.clone()),
-            ..WorkspaceCopyParts::default()
-        },
-        AgentSelection::LastBlocks(_) | AgentSelection::All => {
-            WorkspaceCopyParts::from_block(TextPair {
-                plain: record.text.combined.clone(),
-                ansi: String::new(),
-            })
-        }
+        AgentSelection::LastBlocks(_) | AgentSelection::All => WorkspaceCopyParts::from_block(
+            record_text_to_pair(record.copy_text(RecordTextMode::Combined, false)),
+        ),
+        _ => work_copy_parts_to_workspace(record.copy_parts(false)),
     }
 }
 
-fn join_record_io(record: &WorkRecord) -> String {
-    [record.text.input.as_deref(), record.text.output.as_deref()]
-        .into_iter()
-        .flatten()
-        .filter(|text| !text.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+fn work_copy_parts_to_workspace(parts: WorkRecordCopyParts) -> WorkspaceCopyParts {
+    WorkspaceCopyParts {
+        input: record_text_to_pair(parts.input),
+        output: record_text_to_pair(parts.output),
+        block: record_text_to_pair(parts.block),
+        command: record_text_to_pair(parts.command),
+    }
 }
 
-fn plain_text_pair(text: String) -> TextPair {
+fn record_text_to_pair(text: RecordText) -> TextPair {
+    let ansi = text.ansi.unwrap_or_else(|| text.plain.clone());
     TextPair {
-        plain: text,
-        ansi: String::new(),
+        plain: text.plain,
+        ansi,
+    }
+}
+
+fn record_text_mode(mode: CopyMode) -> RecordTextMode {
+    match mode {
+        CopyMode::Both => RecordTextMode::Combined,
+        CopyMode::InputOnly => RecordTextMode::Input,
+        CopyMode::OutputOnly => RecordTextMode::Output,
+        CopyMode::CommandOnly => RecordTextMode::Command,
     }
 }
 
@@ -1334,66 +1241,71 @@ pub(super) fn build_text_preview(text: &str) -> String {
 mod tests {
     use super::vim::{is_vim_command, vim_single_quote};
     use super::{
-        agent_session_preview, filter_lines_by_regex, filter_lines_by_spec, format_block,
-        record_to_copy_parts, records_to_text_pairs, resolve_agent_session_selector,
-        AgentBlockKind, AgentProvider, AgentSelection, AgentSession, AgentSessionInfo,
-        AgentSessionProvider, CommandBlock, CopyMode, TextPair,
+        agent_session_preview, filter_lines_by_regex, filter_lines_by_spec, record_to_copy_parts,
+        records_to_text_pairs, resolve_agent_session_selector, AgentBlockKind, AgentProvider,
+        AgentSelection, AgentSession, AgentSessionInfo, AgentSessionProvider, TextPair,
     };
     use anyhow::Result;
     use sivtr_core::ai::AgentBlock;
+    use sivtr_core::record::{RecordTextMode, WorkRecord};
+    use sivtr_core::session::SessionEntry;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
     #[test]
     fn formats_modes() {
-        let block = CommandBlock {
-            input_with_prompt: "PS C:\\repo> git status --all -a".to_string(),
-            input_without_prompt: "git status --all -a".to_string(),
-            output: "clean".to_string(),
-            command: "git status --all -a".to_string(),
-        };
+        let record = WorkRecord::terminal(
+            &SessionEntry::new("PS C:\\repo>", "git status --all -a", "clean"),
+            Path::new("current"),
+            0,
+        )
+        .unwrap();
         assert_eq!(
-            format_block(&block, CopyMode::Both, false, None),
+            record.copy_text(RecordTextMode::Combined, false).plain,
             "git status --all -a\nclean"
         );
         assert_eq!(
-            format_block(&block, CopyMode::Both, true, None),
+            record.copy_text(RecordTextMode::Combined, true).plain,
             "PS C:\\repo> git status --all -a\nclean"
         );
         assert_eq!(
-            format_block(&block, CopyMode::InputOnly, false, None),
+            record.copy_text(RecordTextMode::Input, false).plain,
             "git status --all -a"
         );
         assert_eq!(
-            format_block(&block, CopyMode::InputOnly, true, None),
+            record.copy_text(RecordTextMode::Input, true).plain,
             "PS C:\\repo> git status --all -a"
         );
         assert_eq!(
-            format_block(&block, CopyMode::OutputOnly, false, None),
+            record.copy_text(RecordTextMode::Output, false).plain,
             "clean"
         );
         assert_eq!(
-            format_block(&block, CopyMode::CommandOnly, false, None),
+            record.copy_text(RecordTextMode::Command, false).plain,
             "git status --all -a"
         );
     }
 
     #[test]
     fn rewrites_prompt_in_copied_input() {
-        let block = CommandBlock {
-            input_with_prompt: "PS C:\\repo> cargo test".to_string(),
-            input_without_prompt: "cargo test".to_string(),
-            output: "ok".to_string(),
-            command: "cargo test".to_string(),
-        };
+        let record = WorkRecord::terminal(
+            &SessionEntry::new("PS C:\\repo>", "cargo test", "ok"),
+            Path::new("current"),
+            0,
+        )
+        .unwrap();
 
         assert_eq!(
-            format_block(&block, CopyMode::InputOnly, true, Some(":")),
+            record
+                .copy_text_with_prompt(RecordTextMode::Input, true, Some(":"))
+                .plain,
             ": cargo test"
         );
         assert_eq!(
-            format_block(&block, CopyMode::Both, true, Some(">>>")),
+            record
+                .copy_text_with_prompt(RecordTextMode::Combined, true, Some(">>>"))
+                .plain,
             ">>> cargo test\nok"
         );
     }
