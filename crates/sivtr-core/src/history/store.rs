@@ -2,6 +2,9 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
 
+use super::layer::{
+    DialogueInfo, InputEntry, LayerPath, OutputEntry, SessionInfo, SourceInfo, WorkspaceInfo,
+};
 use super::schema;
 
 /// Capture source type.
@@ -22,7 +25,7 @@ impl std::fmt::Display for CaptureSource {
     }
 }
 
-/// A history entry stored in the database.
+/// A history entry stored in the database (y table).
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
     pub id: i64,
@@ -63,7 +66,9 @@ impl HistoryStore {
         Ok(Self { conn })
     }
 
-    /// Insert a new history entry.
+    // ── y table: raw history ──
+
+    /// Insert a new history entry into the y table.
     pub fn insert(
         &self,
         content: &str,
@@ -92,6 +97,356 @@ impl HistoryStore {
         Ok(self.conn.last_insert_rowid())
     }
 
+    // ── i table: input ──
+
+    /// Insert an input entry with full layer path.
+    pub fn insert_input(
+        &self,
+        path: &LayerPath,
+        content: &str,
+        content_type: &str,
+        timestamp: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO input (workspace, source, session_id, dialogue_id, content, content_type, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                path.workspace,
+                path.source,
+                path.session_id,
+                path.dialogue_id,
+                content,
+                content_type,
+                timestamp
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Get an input entry by ID.
+    pub fn get_input(&self, id: i64) -> Result<Option<InputEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace, source, session_id, dialogue_id, content, content_type, timestamp
+             FROM input WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![id], map_input_row)?;
+        match rows.next() {
+            Some(Ok(entry)) => Ok(Some(entry)),
+            Some(Err(e)) => Err(e.into()),
+            None => Ok(None),
+        }
+    }
+
+    /// Search input by FTS across content.
+    pub fn search_input(&self, query: &str, limit: usize) -> Result<Vec<InputEntry>> {
+        let fts_query = build_fts_query(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT i.id, i.workspace, i.source, i.session_id, i.dialogue_id, i.content, i.content_type, i.timestamp
+             FROM input i
+             JOIN input_fts fts ON i.id = fts.rowid
+             WHERE input_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![fts_query, limit], map_input_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// Search input filtered by workspace and source.
+    pub fn search_input_scoped(
+        &self,
+        workspace: &str,
+        source: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<InputEntry>> {
+        let fts_query = build_fts_query(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT i.id, i.workspace, i.source, i.session_id, i.dialogue_id, i.content, i.content_type, i.timestamp
+             FROM input i
+             JOIN input_fts fts ON i.id = fts.rowid
+             WHERE input_fts MATCH ?1 AND i.workspace = ?2 AND i.source = ?3
+             ORDER BY rank
+             LIMIT ?4",
+        )?;
+        let entries = stmt
+            .query_map(
+                rusqlite::params![fts_query, workspace, source, limit],
+                map_input_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// List input entries for a specific dialogue.
+    pub fn list_dialogue_inputs(&self, path: &LayerPath) -> Result<Vec<InputEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace, source, session_id, dialogue_id, content, content_type, timestamp
+             FROM input
+             WHERE workspace = ?1 AND source = ?2 AND session_id = ?3 AND dialogue_id = ?4
+             ORDER BY id",
+        )?;
+        let entries = stmt
+            .query_map(
+                rusqlite::params![path.workspace, path.source, path.session_id, path.dialogue_id],
+                map_input_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    // ── o table: output ──
+
+    /// Insert an output entry with full layer path.
+    pub fn insert_output(
+        &self,
+        path: &LayerPath,
+        content: &str,
+        content_type: &str,
+        timestamp: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO output (workspace, source, session_id, dialogue_id, content, content_type, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                path.workspace,
+                path.source,
+                path.session_id,
+                path.dialogue_id,
+                content,
+                content_type,
+                timestamp
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Get an output entry by ID.
+    pub fn get_output(&self, id: i64) -> Result<Option<OutputEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace, source, session_id, dialogue_id, content, content_type, timestamp
+             FROM output WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![id], map_output_row)?;
+        match rows.next() {
+            Some(Ok(entry)) => Ok(Some(entry)),
+            Some(Err(e)) => Err(e.into()),
+            None => Ok(None),
+        }
+    }
+
+    /// Search output by FTS across content.
+    pub fn search_output(&self, query: &str, limit: usize) -> Result<Vec<OutputEntry>> {
+        let fts_query = build_fts_query(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT o.id, o.workspace, o.source, o.session_id, o.dialogue_id, o.content, o.content_type, o.timestamp
+             FROM output o
+             JOIN output_fts fts ON o.id = fts.rowid
+             WHERE output_fts MATCH ?1
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![fts_query, limit], map_output_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// Search output filtered by workspace and source.
+    pub fn search_output_scoped(
+        &self,
+        workspace: &str,
+        source: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<OutputEntry>> {
+        let fts_query = build_fts_query(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT o.id, o.workspace, o.source, o.session_id, o.dialogue_id, o.content, o.content_type, o.timestamp
+             FROM output o
+             JOIN output_fts fts ON o.id = fts.rowid
+             WHERE output_fts MATCH ?1 AND o.workspace = ?2 AND o.source = ?3
+             ORDER BY rank
+             LIMIT ?4",
+        )?;
+        let entries = stmt
+            .query_map(
+                rusqlite::params![fts_query, workspace, source, limit],
+                map_output_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// List output entries for a specific dialogue.
+    pub fn list_dialogue_outputs(&self, path: &LayerPath) -> Result<Vec<OutputEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace, source, session_id, dialogue_id, content, content_type, timestamp
+             FROM output
+             WHERE workspace = ?1 AND source = ?2 AND session_id = ?3 AND dialogue_id = ?4
+             ORDER BY id",
+        )?;
+        let entries = stmt
+            .query_map(
+                rusqlite::params![path.workspace, path.source, path.session_id, path.dialogue_id],
+                map_output_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    // ── Layer traversal queries ──
+
+    /// List distinct workspaces.
+    pub fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                coalesce(i.workspace, o.workspace) as workspace,
+                (SELECT count(distinct source) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
+                  + (SELECT count(distinct source) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as source_count,
+                (SELECT count(distinct session_id) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
+                  + (SELECT count(distinct session_id) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as session_count,
+                (SELECT count(distinct dialogue_id) FROM input WHERE workspace = coalesce(i.workspace, o.workspace))
+                  + (SELECT count(distinct dialogue_id) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)) as dialogue_count,
+                coalesce(
+                  (SELECT max(timestamp) FROM input WHERE workspace = coalesce(i.workspace, o.workspace)),
+                  (SELECT max(timestamp) FROM output WHERE workspace = coalesce(i.workspace, o.workspace)),
+                  ''
+                ) as last_active
+             FROM input i
+             FULL OUTER JOIN output o ON i.workspace = o.workspace
+             GROUP BY workspace
+             ORDER BY last_active DESC",
+        )?;
+        let entries = stmt
+            .query_map([], |row| {
+                Ok(WorkspaceInfo {
+                    name: row.get(0)?,
+                    source_count: row.get(1)?,
+                    session_count: row.get(2)?,
+                    dialogue_count: row.get(3)?,
+                    last_active: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// List sources for a given workspace.
+    pub fn list_sources(&self, workspace: &str) -> Result<Vec<SourceInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                source,
+                (SELECT count(distinct session_id) FROM input WHERE workspace = ?1 AND source = s.source) as session_count,
+                (SELECT count(distinct dialogue_id) FROM input WHERE workspace = ?1 AND source = s.source) as dialogue_count,
+                coalesce(
+                  (SELECT max(timestamp) FROM input WHERE workspace = ?1 AND source = s.source),
+                  ''
+                ) as last_active
+             FROM (SELECT source FROM input WHERE workspace = ?1
+                   UNION SELECT source FROM output WHERE workspace = ?1) s
+             ORDER BY last_active DESC",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![workspace], |row| {
+                Ok(SourceInfo {
+                    name: row.get(0)?,
+                    session_count: row.get(1)?,
+                    dialogue_count: row.get(2)?,
+                    last_active: row.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// List sessions for a given workspace + source.
+    pub fn list_sessions(&self, workspace: &str, source: &str) -> Result<Vec<SessionInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                session_id,
+                count(distinct dialogue_id) as dialogue_count,
+                min(timestamp) as first_at,
+                max(timestamp) as last_at
+             FROM input
+             WHERE workspace = ?1 AND source = ?2
+             GROUP BY session_id
+             ORDER BY last_at DESC",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![workspace, source], |row| {
+                Ok(SessionInfo {
+                    id: row.get(0)?,
+                    dialogue_count: row.get(1)?,
+                    first_at: row.get(2)?,
+                    last_at: row.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// List dialogues for a given workspace + source + session.
+    pub fn list_dialogues(
+        &self,
+        workspace: &str,
+        source: &str,
+        session_id: &str,
+    ) -> Result<Vec<DialogueInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                dialogue_id,
+                count(*) as input_count,
+                0 as output_count,
+                min(timestamp) as first_at,
+                max(timestamp) as last_at
+             FROM input
+             WHERE workspace = ?1 AND source = ?2 AND session_id = ?3
+             GROUP BY dialogue_id
+             ORDER BY last_at DESC",
+        )?;
+        let mut entries: Vec<DialogueInfo> = stmt
+            .query_map(
+                rusqlite::params![workspace, source, session_id],
+                |row| {
+                    Ok(DialogueInfo {
+                        id: row.get(0)?,
+                        input_count: row.get(1)?,
+                        output_count: row.get(2)?,
+                        first_at: row.get(3)?,
+                        last_at: row.get(4)?,
+                    })
+                },
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        // Merge output counts
+        let mut output_stmt = self.conn.prepare(
+            "SELECT dialogue_id, count(*) as output_count
+             FROM output
+             WHERE workspace = ?1 AND source = ?2 AND session_id = ?3
+             GROUP BY dialogue_id",
+        )?;
+        let output_counts: Vec<(String, i64)> = output_stmt
+            .query_map(
+                rusqlite::params![workspace, source, session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for entry in &mut entries {
+            if let Some((_, count)) = output_counts.iter().find(|(id, _)| *id == entry.id) {
+                entry.output_count = *count;
+            }
+        }
+
+        Ok(entries)
+    }
+
+    // ── Helpers ──
+
     /// Get default database path.
     fn default_db_path() -> Result<PathBuf> {
         let data_dir =
@@ -107,5 +462,45 @@ impl HistoryStore {
         }
 
         Ok(current)
+    }
+}
+
+fn map_input_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputEntry> {
+    Ok(InputEntry {
+        id: row.get(0)?,
+        workspace: row.get(1)?,
+        source: row.get(2)?,
+        session_id: row.get(3)?,
+        dialogue_id: row.get(4)?,
+        content: row.get(5)?,
+        content_type: row.get(6)?,
+        timestamp: row.get(7)?,
+    })
+}
+
+fn map_output_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<OutputEntry> {
+    Ok(OutputEntry {
+        id: row.get(0)?,
+        workspace: row.get(1)?,
+        source: row.get(2)?,
+        session_id: row.get(3)?,
+        dialogue_id: row.get(4)?,
+        content: row.get(5)?,
+        content_type: row.get(6)?,
+        timestamp: row.get(7)?,
+    })
+}
+
+fn build_fts_query(query: &str) -> String {
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect();
+
+    if terms.is_empty() {
+        "\"\"".to_string()
+    } else {
+        terms.join(" ")
     }
 }
