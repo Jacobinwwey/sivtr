@@ -1,77 +1,172 @@
 ---
 title: 快速开始
-description: 捕获输出、搜索、选择文本，并复制命令块。
+description: 打开统一 workspace TUI，浏览终端命令和所有 Agent 会话，并让 Agent 复用同一份本地记忆。
 ---
 
-这篇快速开始覆盖主流程：捕获终端输出、浏览输出、复制选中范围，然后复用最近的命令块。
+`sivtr` 有两条日常路径：
 
-## 1. 把输出管道到浏览器
+- **给人用**：打开 `sivtr` TUI 面板，一起浏览终端输出和 Agent 会话，跨来源搜索，再复制真正需要的片段。
+- **给 Agent 用**：通过 `sivtr search`、`sivtr copy --print` 和 `sivtr show` 等 CLI 指令检索本地 workspace memory。
 
-```bash
-cargo test 2>&1 | sivtr
-```
+## 1. 先让终端记录进入 workspace
 
-TUI 会打开合并后的输出。常用按键：
-
-- `j` / `k` 逐行移动；
-- `Ctrl-D` / `Ctrl-U` 半页移动；
-- `gg` / `G` 跳到顶部或底部；
-- `/panic` 搜索；
-- `n` / `N` 跳到下一个或上一个匹配；
-- `q` 退出。
-
-## 2. 选择并复制
-
-在浏览器里：
-
-1. 移到文本起点。
-2. 按 `V` 开始按行选择。
-3. 移到范围终点。
-4. 按 `y`。
-
-选中文本会复制到系统剪贴板。
-
-矩形选择用 `Ctrl-V` 代替 `V`。
-
-## 3. 包装一个命令
-
-当你希望 `sivtr` 执行命令并捕获 stdout/stderr 时，使用 `sivtr run`：
-
-```bash
-sivtr run cargo test
-sivtr run python scripts/check.py
-```
-
-`sivtr` 会打印进程退出状态，然后打开捕获的输出。
-
-## 4. 启用命令块复制
-
-先安装一次 shell 集成：
+如果是第一次使用，先安装一次 shell 集成：
 
 ```bash
 sivtr init powershell
+# 或：sivtr init bash
+# 或：sivtr init zsh
+# 或：sivtr init nushell
 ```
 
-重启 shell，运行几个命令，然后复制最近的块：
+重启 shell，然后照常工作：
 
 ```bash
-sivtr copy
-sivtr copy out
-sivtr copy cmd 2
-sivtr copy 2..4 --print
+bun run build
+cargo test
+git status --short
 ```
 
-选择器按“最新优先”解释。`1` 是最新命令块，`2` 是上一个，`2..4` 是最近的一段范围。
+这一步会让最近命令和输出出现在 workspace 里。Agent 会话（Claude、Codex、OpenCode、Pi）会从各自的本地 session 目录读取。
 
-## 5. 复制 Codex 输出
+## 2. 打开统一 workspace TUI
 
-在有 Codex 会话的项目目录中：
+运行：
 
 ```bash
-sivtr copy codex out
-sivtr copy codex in
-sivtr copy codex tool --regex error
-sivtr copy codex all --lines 1:40
+sivtr
 ```
 
-`sivtr` 会找到工作目录匹配当前项目的最新 Codex 会话。
+这是最重要的入口。它不是只看 terminal，也不是只看某一个 Agent，而是把当前机器上的本地工作记忆合在一个界面里。
+
+Workspace TUI 有四个面板：
+
+| 面板 | 用途 |
+| --- | --- |
+| Source | 选择来源，比如 terminal、Claude、Codex、OpenCode、Pi |
+| Sessions | 选择某个终端记录或 Agent session |
+| Dialogues | 选择某轮对话或命令块 |
+| Content | 查看具体输入、输出、工具结果或正文 |
+
+常用按键：
+
+| 按键 | 动作 |
+| --- | --- |
+| `0` / `1` / `2` / `3` | 聚焦 Source、Sessions、Dialogues、Content 面板 |
+| `j` / `k` | 在当前面板上下移动 |
+| `h` / `l` | 切换到前一个 / 后一个面板 |
+| `Space` | 切换当前 source、session 或 dialogue |
+| `/` | 搜索 workspace |
+| `n` / `N` | 下一个 / 上一个搜索结果 |
+| `i` | 复制输入或问题 |
+| `o` | 复制输出或回答 |
+| `y` | 复制输入 + 输出 |
+| `c` | 复制裸命令（可用时） |
+| `:` | 给下一次复制设置行过滤 |
+| `t` | 打开当前内容的 full view |
+| `z` | 当前面板全屏 |
+| `?` | 帮助 |
+| `q` / `Esc` | 返回或退出 |
+
+Workspace 搜索支持前缀：
+
+| 写法 | 搜索范围 |
+| --- | --- |
+| `error` | 内容 |
+| `#build` | 对话 / 命令块标题 |
+| `>release` | session 标题 |
+
+## 3. 只打开某一类内容
+
+统一 workspace 是默认入口。如果你只想看某一类内容，可以用更具体的 picker。
+
+只看最近终端命令块：
+
+```bash
+sivtr copy --pick
+```
+
+只看某个 Agent provider：
+
+```bash
+sivtr copy claude --pick
+sivtr copy codex --pick
+sivtr copy opencode --pick
+sivtr copy pi --pick
+```
+
+这些是过滤后的 workspace 视图，不是主入口。
+
+## 4. 需要快速复制时，用命令直接取
+
+已经知道要拿什么时，不必打开 TUI：
+
+```bash
+sivtr copy          # 最近一次命令 + 输出
+sivtr copy out      # 最近一次输出
+sivtr copy cmd      # 最近一次命令
+sivtr copy out 2    # 上一次命令输出
+sivtr copy 2..4     # 一段最近命令块
+```
+
+读取 Agent 会话：
+
+```bash
+sivtr copy claude out --print
+sivtr copy codex out --print
+sivtr copy opencode out --print
+sivtr copy pi out --print
+```
+
+给 Agent 用时通常加 `--print`，避免打开交互界面或只写入剪贴板。
+
+## 5. 让 Agent 先查 workspace memory
+
+当你遇到报错，可以直接说：
+
+```text
+解决刚才的终端报错，先用 sivtr 查。
+```
+
+Agent 应该搜索同一份 workspace memory：
+
+```bash
+sivtr search "error|failed|panic|Traceback|Exception|exit code|FAILED" --json --limit 20
+sivtr copy out 1 --print
+sivtr copy cmd 1..10 --print
+```
+
+然后它再读代码、修复问题、重新运行验证命令。
+
+这就是 `sivtr` 的核心价值：你在统一 workspace 里能看到的东西，Agent 也能用命令读取。
+
+## 6. 用 ref 回到精确证据
+
+搜索结果会包含 ref。ref 可以指向终端命令块、Agent session、某轮 dialogue，或其中一段内容。
+
+```bash
+sivtr search "build error" --json --limit 20
+sivtr show terminal/current/2
+sivtr show claude/<session>/3
+sivtr show claude/<session>/3/2
+```
+
+Ref 让人和 Agent 回到同一份证据，而不是凭印象复述。
+
+## 7. 单次长输出也可以打开 browser
+
+除了 workspace TUI，`sivtr` 也有一个单缓冲区 browser，适合临时查看一段长输出：
+
+```bash
+cargo test 2>&1 | sivtr
+sivtr run bun run build
+```
+
+这个界面只浏览当前这次输出；裸 `sivtr` 打开的 workspace TUI 才是统一查看终端和 Agent 记忆的主入口。
+
+## 下一步
+
+- 阅读[心智模型](/zh-cn/start/core-concepts/)理解 source、session、dialogue、block 和 ref。
+- 看[玩法实例](/zh-cn/playbooks/)了解真实工作流。
+- 查看[浏览和选择](/zh-cn/usage/browse-and-select/)学习完整 workspace TUI 操作。
+- 查看 [CLI 参考](/zh-cn/reference/cli/)确认精确选项。

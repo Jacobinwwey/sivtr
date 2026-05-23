@@ -1,17 +1,17 @@
 ---
 title: CLI 参考
-description: 命令语法、子命令、选项、选择器和示例。
+description: 命令语法、子命令、选项、provider、selector 和示例。
 ---
 
-本页记录公开 CLI 表面，应与 `src/cli.rs` 保持一致。
+本页记录公开 CLI 表面。事实来源是 `src/cli.rs`；已安装版本请以 `sivtr --help` 和 `sivtr <command> --help` 为准。
 
-## 顶层命令
+## 顶层
 
 ```bash
 sivtr [COMMAND]
 ```
 
-如果没有提供命令，`sivtr` 会读取 stdin，与管道模式一致。
+不提供命令时，`sivtr` 从 stdin 读取，等价于 pipe mode。
 
 ## run
 
@@ -19,9 +19,7 @@ sivtr [COMMAND]
 sivtr run <COMMAND> [ARGS...]
 ```
 
-运行命令，捕获合并输出，报告退出状态，然后打开捕获的输出。
-
-示例：
+运行命令，捕获合并后的 stdout/stderr，报告退出状态，在启用时保存 history，并打开捕获输出。
 
 ```bash
 sivtr run cargo test
@@ -34,7 +32,7 @@ sivtr run git status --short
 sivtr pipe
 ```
 
-读取 stdin 并打开。通常直接管道到 `sivtr` 等价：
+读取 stdin 并打开。直接管道到 `sivtr` 等价：
 
 ```bash
 cargo build 2>&1 | sivtr
@@ -46,25 +44,26 @@ cargo build 2>&1 | sivtr
 sivtr import
 ```
 
-打开当前结构化会话日志。需要 shell 集成。
+打开当前结构化 shell session log。需要 shell 集成。
 
 ## init
 
 ```bash
-sivtr init <SHELL>
+sivtr init <TARGET>
 ```
 
-支持的 shell 名称：
+支持的 target：
 
-- `powershell`
-- `pwsh`
-- `bash`
-- `zsh`
-- `nushell`
-- `nu`
-- `tmux`
-- `linux-shortcut`
-- `macos-shortcut`
+| Target | 用途 |
+| --- | --- |
+| `powershell` | 安装 Windows PowerShell hook |
+| `pwsh` | PowerShell 集成别名 |
+| `bash` | 安装 Bash hook |
+| `zsh` | 安装 Zsh hook |
+| `nushell` / `nu` | 安装 Nushell hook |
+| `tmux` | 安装 tmux picker 绑定 |
+| `linux-shortcut` | 生成 Linux 桌面/终端 picker launcher |
+| `macos-shortcut` | 生成 macOS Terminal/LaunchAgent picker launcher |
 
 ## copy
 
@@ -72,40 +71,39 @@ sivtr init <SHELL>
 sivtr copy [MODE] [SELECTOR] [OPTIONS]
 ```
 
-模式：
+命令块 mode：
 
-| 模式 | 含义 |
+| Mode | 含义 |
 | --- | --- |
-| 不写模式 | 复制输入加输出 |
+| 无 mode | 复制输入加输出 |
 | `in` | 复制输入 |
 | `out` | 复制输出 |
 | `cmd` | 复制裸命令 |
-| `codex` | 复制 Codex 会话内容 |
 
 别名：
 
 | 别名 | 展开为 |
 | --- | --- |
-| `c` | `copy` |
-| `ci` | `copy in` |
-| `co` | `copy out` |
-| `cc` | `copy cmd` |
+| `sivtr c` | `sivtr copy` |
+| `sivtr ci` | `sivtr copy in` |
+| `sivtr co` | `sivtr copy out` |
+| `sivtr cc` | `sivtr copy cmd` |
 
-常用选项：
+通用选项：
 
 | 选项 | 含义 |
 | --- | --- |
-| `--ansi` | 可用时复制带 ANSI 装饰的文本 |
-| `--pick` | 打开交互式选择器 |
+| `--ansi` | 有可用 ANSI 内容时复制 ANSI-decorated text |
+| `--pick` | 打开交互式 picker |
 | `--print` | 复制后打印文本 |
 | `--regex <PATTERN>` | 只保留匹配正则的行 |
-| `--lines <SPEC>` | 只保留 1-based 行范围 |
+| `--lines <SPEC>` | 只保留 1-based 行选择 |
 
-支持输入的模式还支持：
+可复制输入的 mode 还支持：
 
 | 选项 | 含义 |
 | --- | --- |
-| `--prompt <TEXT>` | 重写复制输入里的 prompt |
+| `--prompt <TEXT>` | 重写复制出来的输入 prompt |
 
 示例：
 
@@ -118,32 +116,47 @@ sivtr copy out --pick --regex panic
 sivtr copy cmd --pick
 ```
 
-## copy codex
+## copy agent provider sessions
 
 ```bash
-sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
+sivtr copy <PROVIDER> [MODE] [SELECTOR] [OPTIONS]
 ```
 
-模式：
+Provider：
 
-| 模式 | 含义 |
+| Provider | 命令 |
 | --- | --- |
-| 不写模式 | 最近已完成的用户消息加助手回复 |
-| `out` | 最近助手回复 |
+| Codex | `sivtr copy codex` |
+| Claude Code | `sivtr copy claude` |
+| OpenCode | `sivtr copy opencode` |
+| Pi | `sivtr copy pi` |
+
+Mode：
+
+| Mode | 含义 |
+| --- | --- |
+| 无 mode | 最近完整 user + assistant turn |
 | `in` | 最近用户消息 |
+| `out` | 最近助手回复 |
 | `tool` | 最近工具输出 |
-| `all` | 整个解析后的会话 |
+| `all` | 完整解析会话 |
+
+Agent copy 选项包含所有通用 copy 选项，外加：
+
+| 选项 | 含义 |
+| --- | --- |
+| `--session <N|ID>` | 选择第 N 新的可选 session，或匹配 id/id 前缀 |
 
 示例：
 
 ```bash
-sivtr copy codex
-sivtr copy codex 2
+sivtr copy claude
+sivtr copy claude out --print
+sivtr copy claude --session 2
 sivtr copy codex 2..4
-sivtr copy codex out --print
 sivtr copy codex out --pick
-sivtr copy codex tool --regex error
-sivtr copy codex all --lines 1:20
+sivtr copy opencode all --lines 1:20
+sivtr copy pi tool --regex error
 ```
 
 ## diff
@@ -152,9 +165,9 @@ sivtr copy codex all --lines 1:20
 sivtr diff <LEFT> <RIGHT> [OPTIONS]
 ```
 
-比较当前会话里的两个最近命令块。每个选择器必须解析为单个块。
+比较当前 shell session 中两个最近命令块。每个 selector 必须解析成单个块。
 
-内容模式：
+内容选项：
 
 | 选项 | 含义 |
 | --- | --- |
@@ -167,7 +180,7 @@ sivtr diff <LEFT> <RIGHT> [OPTIONS]
 
 | 选项 | 含义 |
 | --- | --- |
-| `--side-by-side` | 显示双栏文本视图 |
+| `--side-by-side` | 显示两列文本视图 |
 
 示例：
 
@@ -175,6 +188,63 @@ sivtr diff <LEFT> <RIGHT> [OPTIONS]
 sivtr diff 1 2
 sivtr diff 3 1 --block
 sivtr diff 2 1 --side-by-side
+```
+
+## search
+
+```bash
+sivtr search <QUERY> [OPTIONS]
+```
+
+搜索当前 workspace 的 Agent session，并在 shell 集成有数据时包含当前终端 session log。
+
+选项：
+
+| 选项 | 含义 |
+| --- | --- |
+| `--scope <SCOPE>` | `content`、`dialogue` 或 `session`；默认是 `content` |
+| `--provider <PROVIDER>` | `all`、`codex`、`claude`、`opencode` 或 `pi`；默认是 `all` |
+| `--cwd <PATH>` | 用于解析 session 的工作区目录 |
+| `-l, --limit <N>` | 最大打印结果数；默认是 `20` |
+| `--json` | 打印机器可读 JSON |
+
+示例：
+
+```bash
+sivtr search panic
+sivtr search "workspace picker" --scope dialogue
+sivtr search sivtr --scope session --provider codex
+sivtr search "build error" --json --limit 20
+```
+
+## show
+
+```bash
+sivtr show <REF> [OPTIONS]
+```
+
+打印 Agent provider 或当前终端 session 的 workspace ref。
+
+Ref 语法：
+
+```text
+source/session[/dialogue[/line]]
+```
+
+选项：
+
+| 选项 | 含义 |
+| --- | --- |
+| `--cwd <PATH>` | 用于解析 session 的工作区目录 |
+| `--json` | 打印机器可读 JSON |
+
+示例：
+
+```bash
+sivtr show claude/<session-id>
+sivtr show claude/<session-id>/3
+sivtr show claude/<session-id>/3/7 --json
+sivtr show terminal/current/2
 ```
 
 ## history
@@ -188,10 +258,10 @@ sivtr history [COMMAND]
 | 命令 | 含义 |
 | --- | --- |
 | `list [-l, --limit <N>]` | 列出最近条目 |
-| `search <KEYWORD> [-l, --limit <N>]` | 搜索历史 |
-| `show <ID>` | 显示指定条目 |
+| `search <KEYWORD> [-l, --limit <N>]` | 搜索保存的捕获 history |
+| `show <ID>` | 展示指定 history 条目 |
 
-如果没有提供 history 子命令，`sivtr` 会列出最近 20 条。
+不提供 history 子命令时，默认使用 `list`。
 
 ## config
 
@@ -207,7 +277,7 @@ sivtr config [COMMAND]
 | `init` | 创建默认配置 |
 | `edit` | 在编辑器中打开配置 |
 
-如果没有提供 config 子命令，默认使用 `show`。
+不提供 config 子命令时，默认使用 `show`。
 
 ## hotkey
 
@@ -219,11 +289,47 @@ sivtr hotkey [COMMAND]
 
 | 命令 | 含义 |
 | --- | --- |
-| `start [--chord <CHORD>]` | 启动 Windows 热键守护进程 |
-| `status` | 显示守护进程状态 |
-| `stop` | 停止守护进程 |
+| `start [--chord <CHORD>] [--provider <PROVIDER>]` | 启动 Windows 全局热键 daemon |
+| `status` | 显示 daemon 状态 |
+| `stop` | 停止 daemon |
 
-如果没有提供 hotkey 子命令，默认使用 `status`。
+不提供 hotkey 子命令时，默认使用 `status`。
+
+示例：
+
+```bash
+sivtr hotkey start
+sivtr hotkey start --chord alt+y
+sivtr hotkey start --provider claude
+sivtr hotkey status
+sivtr hotkey stop
+```
+
+## codex export
+
+```bash
+sivtr codex export --dest <PATH> [OPTIONS]
+```
+
+把本地 Codex rollout JSONL 文件导出到一个包含 `sessions/` 树的目标目录。
+
+选项：
+
+| 选项 | 含义 |
+| --- | --- |
+| `--dest <PATH>` | 接收 `sessions/` 树的目标目录 |
+| `--limit <N>` | 只保留最新 N 个 session 文件；`0` 表示全部导出 |
+| `--watch` | 持续 mirror 本地 session |
+| `--interval <SECONDS>` | watch 时两次同步之间的秒数；默认 `1` |
+| `--interval-ms <MILLISECONDS>` | 两次同步之间的毫秒数；覆盖 `--interval` |
+
+示例：
+
+```bash
+sivtr codex export --dest /srv/sivtr/root-codex
+sivtr codex export --dest /srv/sivtr/root-codex --watch
+sivtr codex export --dest /srv/sivtr/root-codex --limit 100
+```
 
 ## clear
 
@@ -231,15 +337,8 @@ sivtr hotkey [COMMAND]
 sivtr clear [--all]
 ```
 
-清理会话日志。`--all` 会清理所有记录的会话日志和状态文件。
+清理当前 shell session log。`--all` 会清理由 `sivtr` 管理的所有记录 session log 和 state 文件。
 
-## 选择器语法
+## 共享语法
 
-| 选择器 | 含义 |
-| --- | --- |
-| 省略 | `1` |
-| `1` | 最新匹配项 |
-| `2` | 第二新的匹配项 |
-| `2..4` | 最近范围 |
-
-命令块复制、Codex 复制和 diff 在适用时共享选择器语义。
+Recency selector、`--session`、provider、`--regex`、`--lines`、`--ansi`、`--print` 和 workspace ref 见 [Selector 和 Filter](/zh-cn/reference/selectors-and-filters/)。

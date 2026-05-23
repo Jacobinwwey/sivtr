@@ -1,11 +1,16 @@
 ---
 title: Browse and Select
-description: Navigate the TUI, search output, select text, and open an editor.
+description: Navigate the browser and workspace picker, search output, select text, and open an editor.
 ---
 
-The built-in browser is read-only and Vim-shaped. It is designed for scanning large terminal output and extracting the useful part.
+`sivtr` has two interactive surfaces:
 
-## Navigation
+- the **browser**, used for one captured output buffer;
+- the **workspace picker**, used for command blocks and agent sessions.
+
+## Browser navigation
+
+The built-in browser is read-only and Vim-shaped. It is designed for scanning large terminal output and extracting the useful part.
 
 | Key | Action |
 | --- | --- |
@@ -24,7 +29,7 @@ The built-in browser is read-only and Vim-shaped. It is designed for scanning la
 | `G` | Bottom |
 | `H` / `M` / `L` | Top, middle, or bottom of view |
 
-## Search
+## Browser search
 
 Press `/`, type a pattern, and press `Enter`.
 
@@ -38,7 +43,7 @@ Press `/`, type a pattern, and press `Enter`.
 
 Search jumps to matching rows and shows match count in the status line.
 
-## Selection
+## Browser selection
 
 | Key | Action |
 | --- | --- |
@@ -51,7 +56,7 @@ Search jumps to matching rows and shows match count in the status line.
 
 Mouse selection is also supported. Drag with the left mouse button to start a selection. Hold `Ctrl` while dragging for block mode.
 
-## Command-block shortcuts
+## Command-block shortcuts in the browser
 
 When browsing a structured session log, `sivtr` can jump, copy, or select the current command block.
 
@@ -67,9 +72,34 @@ When browsing a structured session log, `sivtr` can jump, copy, or select the cu
 | `mvi` | Select current command input |
 | `mvo` | Select current command output |
 
+## Workspace picker basics
+
+Open a picker with commands such as:
+
+```bash
+sivtr copy --pick
+sivtr copy claude --pick
+sivtr copy codex --pick
+```
+
+The picker has Source, Sessions, Dialogues, and Content panes.
+
+| Key | Action |
+| --- | --- |
+| `0` / `1` / `2` / `3` | Focus Source, Sessions, Dialogues, or Content |
+| `Space` | Toggle current source, session, or dialogue |
+| `i` / `o` / `y` / `c` | Copy input, output, block, or command |
+| `/` | Search all sessions |
+| `:` | Set a one-time line filter |
+| `t` | Open Vim-style full view |
+| `z` | Toggle focused pane fullscreen |
+| `?` | Help |
+
+See [Keybindings](/reference/keybindings/) for the full table.
+
 ## Editor handoff
 
-Press `e` to open the current selection, or the whole buffer if nothing is selected, in the configured editor.
+Press `e` in the browser to open the current selection, or the whole buffer if nothing is selected, in the configured editor.
 
 Configure the editor:
 

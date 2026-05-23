@@ -1,9 +1,18 @@
 ---
 title: Copy Command Blocks
-description: Copy recent command input, output, commands, ranges, and filtered lines.
+description: Copy recent shell input, output, commands, ranges, and filtered lines.
 ---
 
-`sivtr copy` works from the structured session log created by shell integration. It does not require opening the TUI.
+`sivtr copy` reads the structured shell session log created by shell integration. It does not require opening the browser.
+
+Install shell integration first if command-block copy has no data:
+
+```bash
+sivtr init powershell
+# or: sivtr init bash / zsh / nushell
+```
+
+Restart the shell after installation.
 
 ## Basic modes
 
@@ -40,7 +49,7 @@ sivtr copy out 2
 sivtr copy in 2..4
 ```
 
-`1` is the latest block. `2` is the previous block. `2..4` selects several recent blocks.
+`1` is the latest block. `2` is the previous block. `2..4` selects several recent blocks. See [Selectors and Filters](/reference/selectors-and-filters/) for the shared syntax.
 
 ## Print after copying
 
@@ -95,7 +104,7 @@ sivtr copy out --pick
 sivtr copy cmd --pick
 ```
 
-Picker keys:
+Useful picker keys:
 
 | Key | Action |
 | --- | --- |
@@ -103,9 +112,11 @@ Picker keys:
 | `Space` | Toggle current entry |
 | `v` | Mark range anchor |
 | `a` | Toggle all |
+| `:` | Start a temporary line filter for the next copy |
 | `p` | Toggle preview |
 | `t` | Open Vim-style full view |
 | `Enter` | Confirm |
+| `Backspace` | Edit the pending line filter |
 | `Esc` | Cancel |
 
-The Vim-style full view supports `[[` and `]]` to jump blocks, `T` to toggle tool content in Codex views, `myy` / `myi` / `myo` / `myc` to copy, and `mvv` / `mvi` / `mvo` to select.
+The Vim-style full view supports `[[` and `]]` to jump blocks, `myy` / `myi` / `myo` / `myc` to copy, and `mvv` / `mvi` / `mvo` to select.

@@ -1,9 +1,9 @@
 ---
-title: 历史
-description: 列出、搜索和显示已保存的输出历史。
+title: 历史记录
+description: 列出、搜索、展示并保留保存过的终端捕获。
 ---
 
-`sivtr` 会把捕获输出保存在本地 SQLite 历史数据库中，并支持 FTS5 全文搜索。历史命令以读取为主：列出最近条目、按关键词搜索，以及显示完整条目。
+`sivtr` 会把捕获到的终端输出存入本地 SQLite history 数据库，并使用 FTS5 搜索。History 面向更长期的终端捕获，它独立于每个 shell 的 session log 和 AI agent transcript。
 
 ## 列出最近条目
 
@@ -13,18 +13,20 @@ sivtr history list
 sivtr history list --limit 50
 ```
 
-输出包含条目 id、时间戳、命令和内容预览。
+输出包含 entry id、时间戳、命令和内容预览。
 
-## 搜索
+## 搜索 history
 
 ```bash
 sivtr history search "panic"
 sivtr history search "failed assertion" --limit 10
 ```
 
-搜索使用历史全文索引。拿到结果 id 后可用 `history show` 查看。
+搜索使用 history 全文索引。拿到 id 后可以配合 `history show`。
 
-## 显示条目
+这不同于 `sivtr search`：后者搜索当前 workspace 的 Agent session，并在 shell 集成有数据时包含当前终端 session log。
+
+## 展示条目
 
 ```bash
 sivtr history show 42
@@ -33,15 +35,15 @@ sivtr history show 42
 详情视图会先打印元数据，再打印保存的内容：
 
 - id；
-- 时间戳；
-- 命令；
-- 来源；
-- 主机；
-- 内容。
+- timestamp；
+- command；
+- source；
+- host；
+- content。
 
 ## 保留策略
 
-历史保留由配置控制：
+History 保留策略由配置控制：
 
 ```toml
 [history]
@@ -49,4 +51,20 @@ auto_save = true
 max_entries = 0
 ```
 
-`max_entries = 0` 表示不限制。
+`max_entries = 0` 表示不限制数量。
+
+禁用自动保存：
+
+```toml
+[history]
+auto_save = false
+```
+
+## 什么时候用 history，什么时候用 session log
+
+| 需求 | 使用 |
+| --- | --- |
+| 搜索较早保存的终端输出 | `sivtr history search` |
+| 复制最近 shell 命令输出 | `sivtr copy out` |
+| 浏览当前 shell 的结构化块 | `sivtr import` |
+| 搜索当前 workspace 的终端和 Agent memory | `sivtr search` |

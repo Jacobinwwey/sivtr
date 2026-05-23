@@ -376,9 +376,9 @@ VS Code extension:
 
 ```bash
 cd editors/vscode
-pnpm install
-pnpm run compile
-pnpm run package
+bun install
+bun run compile
+bun run package
 ```
 
 Workspace layout:

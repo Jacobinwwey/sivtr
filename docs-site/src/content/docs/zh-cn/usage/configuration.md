@@ -1,9 +1,9 @@
 ---
 title: 配置
-description: 创建、查看和编辑 sivtr 配置。
+description: 创建、查看、编辑并理解 sivtr 配置。
 ---
 
-`sivtr` 使用 TOML 配置文件。默认路径遵循各平台的配置目录。
+`sivtr` 使用平台配置目录中的 TOML 配置文件。配置控制打开模式、编辑器交接、history 保留、prompt 检测、Codex mirror 和 Windows 热键按键。
 
 ## 命令
 
@@ -43,7 +43,9 @@ session_dirs = []
 chord = "alt+y"
 ```
 
-## 默认用编辑器打开
+字段级说明见[配置文件](/zh-cn/reference/config-file/)。
+
+## 在编辑器中打开捕获输出
 
 ```toml
 [general]
@@ -53,37 +55,68 @@ open_mode = "editor"
 command = "nvim"
 ```
 
-当 `open_mode` 为 `editor` 时，管道模式、run 模式和会话导入会在外部编辑器中打开捕获文本，而不是内置 TUI。
+当 `open_mode` 是 `editor` 时，pipe mode、run mode 和 session import 会把捕获文本交给外部编辑器，而不是内置 TUI。
+
+## 保留颜色
+
+```toml
+[general]
+preserve_colors = true
+```
+
+启用后，TUI 可以在有 ANSI 内容时显示原始颜色。纯文本复制和搜索仍保持稳定。
 
 ## Prompt 检测
 
-如果你的 prompt 比较特殊，可以添加字面 prompt 前缀：
+如果你的 prompt 比较特殊，添加字面 prompt 前缀：
 
 ```toml
 [copy]
 prompts = ["dev>", "repo $", "PS C:\\repo>"]
 ```
 
-这有助于命令块解析识别会话日志里的命令输入行。
+这能帮助命令块解析识别 session log 中的命令输入行。
 
-## 共享 Codex 会话树
+## History 保留
 
-当另一个账号发布了只读副本时，可以把共享导出的会话树加入配置：
+```toml
+[history]
+auto_save = true
+max_entries = 0
+```
+
+`max_entries = 0` 表示无限制。如果不希望 pipe 和 run capture 自动写入 history，设置 `auto_save = false`。
+
+## 共享 Codex session tree
+
+当另一个账号发布只读副本时，添加共享的 Codex session tree：
 
 ```toml
 [codex]
 session_dirs = ["/srv/sivtr/root-codex/sessions"]
 ```
 
-源账号可以这样创建共享树：
+从源账号创建共享树：
 
 ```bash
 sivtr codex export --dest /srv/sivtr/root-codex
+sivtr codex export --dest /srv/sivtr/root-codex --watch
 ```
 
-在 macOS 上，推荐把共享目录放在 `/Users/Shared` 下：
+目前只有 Codex 有一等共享 mirror 配置。其他 Agent provider 从自己的本地 provider 位置读取。见[数据位置](/zh-cn/reference/data-locations/)。
+
+## 热键按键
 
 ```toml
-[codex]
-session_dirs = ["/Users/Shared/sivtr/root-codex/sessions"]
+[hotkey]
+chord = "alt+y"
+```
+
+除非使用 `--chord` 覆盖，否则 `sivtr hotkey start` 会使用这个按键。
+
+Provider 选择是运行时 CLI 选项，不是配置项：
+
+```bash
+sivtr hotkey start --provider all
+sivtr hotkey start --provider claude
 ```

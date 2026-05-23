@@ -1,14 +1,14 @@
 ---
 title: 架构
-description: sivtr workspace 如何拆分 CLI、TUI 和核心模块。
+description: sivtr memory workspace 如何拆分为 CLI、TUI、命令处理器和 core 模块。
 ---
 
-`sivtr` 是一个 Cargo workspace，主要分两层：
+`sivtr` 是一个 Cargo workspace，主要分为两层：
 
 - `sivtr`：位于 `src/` 的二进制 crate；
 - `sivtr-core`：位于 `crates/sivtr-core/` 的库 crate。
 
-二进制层负责用户交互：CLI 解析、命令分发、TUI 状态和平台相关热键行为。核心 crate 负责可复用逻辑：捕获、解析、buffer、选择、搜索、历史、导出、配置和 Codex 会话解析。
+二进制层负责用户交互：CLI 解析、命令分发、TUI 状态、workspace picker，以及平台相关的 launcher/hotkey 行为。Core crate 负责可复用的 memory 逻辑：capture、解析、buffer、selection、search primitives、history、export、config 和 Agent provider session 解析。
 
 ## Workspace 布局
 
@@ -24,83 +24,101 @@ sivtr/
 `- crates/
    `- sivtr-core/
       `- src/
+         |- ai.rs
          |- buffer/
          |- capture/
+         |- claude.rs
+         |- codex.rs
          |- config/
          |- export/
          |- history/
+         |- opencode.rs
          |- parse/
+         |- pi.rs
          |- search/
          |- selection/
-         |- session/
-         `- codex.rs
+         `- session/
 ```
 
-## 二进制 crate
+## Binary crate
 
-二进制 crate 包含：
-
-| 区域 | 职责 |
+| 区域 | 责任 |
 | --- | --- |
-| `cli.rs` | clap 命令定义和帮助文本 |
-| `commands/` | run、pipe、copy、history、config、hotkey、diff 和 import 的命令处理 |
-| `app.rs` | TUI 状态机 |
-| `tui/` | 终端设置、事件处理和渲染 |
-| `command_blocks.rs` | 用于会话浏览和复制的命令块 span |
+| `cli.rs` | clap 命令定义和 help text |
+| `commands/` | run、pipe、copy、history、config、hotkey、diff、import、search、show、clear 和 Codex export 处理器 |
+| `commands/copy/` | 命令块复制、provider copy、workspace picker 集成和 Vim-style picker view |
+| `app.rs` | 捕获输出 browser 状态机 |
+| `tui/` | 终端初始化、事件处理、browser rendering、workspace rendering 和 workspace search UI |
+| `command_blocks.rs` | session 浏览和复制用的命令块 span 解析 |
 
 这一层可以依赖终端 UI 库、平台 API 和进程启动行为。
 
-## 核心 crate
+## Core crate
 
-核心 crate 包含可复用领域逻辑：
-
-| 模块 | 职责 |
+| 模块 | 责任 |
 | --- | --- |
-| `capture` | stdin、子进程和 scrollback/session 捕获辅助 |
-| `parse` | ANSI 去除、Unicode 显示宽度和行解析 |
-| `buffer` | 行、光标和 viewport 模型 |
-| `selection` | visual、line 和 block 选择提取 |
-| `search` | 匹配和导航状态 |
+| `ai` | provider-neutral session、block、metadata 和 parser helpers |
+| `codex`、`claude`、`opencode`、`pi` | provider-specific session 发现和解析 |
+| `capture` | stdin、subprocess 和 scrollback/session capture helper |
+| `parse` | ANSI stripping、Unicode display width 和 line parsing |
+| `buffer` | line、cursor 和 viewport 模型 |
+| `selection` | visual、line 和 block selection 提取 |
+| `search` | 文本匹配和导航状态 |
 | `history` | SQLite 存储、schema 和搜索 |
-| `export` | 剪贴板、文件和编辑器导出辅助 |
+| `export` | clipboard、file 和 editor export helper |
 | `config` | TOML 配置模型、默认值和路径解析 |
-| `session` | 结构化会话条目和渲染 |
-| `codex` | Codex 会话发现、解析和格式化 |
+| `session` | 结构化 shell session entry 和 rendering |
 
-这个拆分让计算和数据处理能独立于 TUI 进行测试。
+这种拆分让计算和数据处理可以独立于终端 UI 测试。
 
-## 捕获流程
+## Capture flow
 
-管道模式：
+Pipe mode：
 
 ```text
 stdin -> capture::pipe -> parse::parse_lines -> Buffer -> App -> TUI/editor
 ```
 
-Run 模式：
+Run mode：
 
 ```text
 subprocess -> combined output -> parse::parse_lines -> Buffer -> App -> TUI/editor
 ```
 
-会话导入：
+Session import：
 
 ```text
 session log -> render entries -> parse::parse_lines -> Buffer -> command block spans -> TUI/editor
 ```
 
-复制模式：
+Command-block copy：
 
 ```text
 session log -> SessionEntry list -> command blocks -> selector -> filters -> clipboard
 ```
 
-Codex 复制：
+Agent-provider copy：
 
 ```text
-~/.codex/sessions -> current cwd match -> parsed blocks -> selector -> filters -> clipboard
+provider transcript/db -> AgentSession -> AgentBlock list -> selector -> filters -> clipboard
 ```
+
+Workspace picker/search：
+
+```text
+terminal context + provider sessions -> WorkspaceSession list -> search/pick/show -> clipboard/stdout/json
+```
+
+## Provider 边界
+
+Agent 支持在命令和 workspace 层是 provider-neutral 的。Provider 模块负责找到本地记录，并把各自事件格式转换成共享 memory block：
+
+```text
+AgentProvider -> AgentSessionProvider -> AgentSession -> AgentBlock
+```
+
+共享 workspace 代码随后可以 copy、pick、search 和 show memory，而不依赖某一个 vendor transcript 形状。
 
 ## 设计边界
 
-前端层负责展示和交互。Rust 核心负责计算：解析、捕获、选择提取、搜索、存储和格式化。这样 UI 改动不会泄漏进数据模型，命令行为也更容易测试。
+Frontend 层负责呈现和交互。Rust core 做持久的 memory 工作：解析、捕获、selection 提取、搜索、存储、provider 解析和格式化。这样 UI 变化不会泄漏到 provider parser，provider 变化也不需要重写整个 CLI 表面。

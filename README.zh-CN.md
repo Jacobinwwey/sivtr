@@ -364,9 +364,9 @@ VS Code 插件：
 
 ```bash
 cd editors/vscode
-pnpm install
-pnpm run compile
-pnpm run package
+bun install
+bun run compile
+bun run package
 ```
 
 仓库结构：

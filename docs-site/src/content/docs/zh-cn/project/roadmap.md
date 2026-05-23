@@ -1,97 +1,124 @@
 ---
-title: 路线图
-description: sivtr 以及个人 AI 工作区方向的产品路线图。
+title: Roadmap
+description: sivtr 和更广义 Agent Memory Workspace 的方向性产品路线图。
 ---
 
-这份路线图是一份工作计划，不是固定发布日期承诺。它按目标描述 `sivtr` 的方向：项目首先要继续做好小而可靠的终端工具，然后再逐步成为长期 AI 工作记录的基础设施。
+这份 roadmap 是工作计划,不是发布承诺。它用结果导向描述 `sivtr` 的方向:保持一个小而有用的终端工具,同时逐步成为面向人和 Agent 的统一 Agent Memory Workspace。
 
-## 路线图
+## Roadmap map
 
 ```text
-可靠 CLI
-  -> 多 agent 工作区
-    -> 高信号 TUI
-      -> sivtr-me
+Reliable CLI
+  -> Multi-agent workspace
+    -> Skills and playbooks
+      -> High-signal TUI
+        -> Remote collaboration
+          -> sivtr-me
 ```
 
-| 方向 | 状态 | 目标结果 |
+| Track | 状态 | 目标结果 |
 | --- | --- | --- |
-| CLI 基础 | 进行中 | 成为日常可用的命令行工具，用来捕获、搜索、选择和导出终端与 agent 工作记录。 |
-| Agent 支持 | 进行中 | 以 provider 中立的方式解析和浏览 AI agent 对话记录。 |
-| TUI workspace | 计划中 | 提供高密度、键盘优先的界面，处理大量会话、多个 provider 和长对话。 |
-| `sivtr-me` | 后续方向 | 基于真实工作记录生成可信的 AI 时代个人名片。 |
+| CLI foundation | 进行中 | 一个日常可用的 CLI,用于捕获、搜索、选择和导出终端与 agent 工作。 |
+| Agent support | 进行中 | 面向 AI Agent 对话记录的 provider-neutral 解析和浏览。 |
+| Skills and playbooks | 进行中 | 把 `sivtr` 作为统一记忆入口的可复用 Agent 流程。 |
+| TUI workspace | 规划中 | 面向多 session、多 provider、长对话的高密度键盘优先界面。 |
+| Remote collaboration | 更后期 | 通过权限控制访问队友或远程 Agent chat 记录，形成协作记忆工作流。 |
+| `sivtr-me` | 更后期 | 基于真实工作记录生成、可追溯证据支撑的个人 AI 时代 profile。 |
 
-## CLI 基础
+## CLI foundation
 
-近期优先级是让命令行能力更完整、更一致、更适合脚本化使用。`sivtr` 应该先成为一个可以每天信任的工具，再扩展成更大的个人数据层。
+近期优先级是让命令行表面完整、可预测、可脚本化。在成为更大的个人数据层之前,`sivtr` 必须先是可靠的日常工具。
 
-- [x] 支持 pipe 模式捕获命令输出。
-- [x] 支持 `sivtr run` 捕获子进程输出。
-- [x] 支持导入 shell session log。
-- [x] 支持按 selector 复制最近的命令输入、输出和命令块。
-- [x] 支持用 SQLite 搜索已保存输出历史。
-- [x] 提供 TOML 配置核心行为。
-- [ ] 统一 `copy`、`history`、`codex`、`hotkey` 和 workspace 等流程的命令命名与参数风格。
-- [ ] 让 selector 和 filter 更容易在 shell 脚本里组合。
-- [ ] 扩展搜索能力，从基础匹配走向明确 scope、literal/keyword/fuzzy/semantic 等方法、来源过滤、排序和带上下文的结构化结果。
-- [ ] 强化大规模本地历史的导入、导出和搜索能力。
-- [ ] 保持配置明确、可迁移，并适合安全共享。
+- [x] 从 pipe mode 捕获命令输出。
+- [x] 用 `sivtr run` 捕获子进程输出。
+- [x] 导入 shell session log。
+- [x] 按 selector 复制最近命令输入、输出和命令块。
+- [x] 用 SQLite 搜索保存过的输出 history。
+- [x] 为核心行为提供 TOML 配置。
+- [ ] 收紧 `copy`、`history`、`codex`、`hotkey` 和 workspace flows 的命名与选项一致性。
+- [ ] 让 selector 和 filter 更容易在 shell 脚本中组合。
+- [ ] 扩展搜索能力:明确 scope、literal/keyword/fuzzy/semantic 方法、source filter、ranking 和上下文丰富的机器可读结果。
+- [ ] 强化大型本地 archive 的 import、export 和 search 行为。
+- [ ] 保持配置显式、可移植、适合安全共享。
 
-## Agent 支持
+## Agent support
 
-AI 会话是一类核心捕获来源。产品目标是让 agent transcript 像普通 `sivtr` 来源一样工作，而不是临时特例。
+Agent session 是一等 memory source。产品目标是让 Agent transcript 像普通 `sivtr` source 一样工作,而不是特殊功能。
 
 - [x] 解析 Codex session 记录。
-- [x] 解析 Claude 风格 session 记录。
-- [x] 复制最近的用户消息、助手回复、工具输出、完整 turn 或完整 session。
+- [x] 解析 Claude-style session 记录。
+- [x] 复制最新 user、assistant、tool、turn 或完整 session block。
 - [x] 通过 picker 浏览本地和镜像 session 目录。
-- [ ] 在共享 session-provider 接口后支持更多 agent。
-- [ ] 把各 provider 的解析逻辑隔离在独立模块里，不污染共享的选择、搜索和导出逻辑。
-- [ ] 让本地、镜像和共享 transcript 目录的会话发现更稳健。
-- [ ] 在 CLI、热键和 TUI workspace 中一致地暴露 provider 选择。
-- [ ] 避免把数据模型绑定到某一家厂商的 transcript 格式。
+- [ ] 在共享 session-provider 接口后支持更多 agent provider。
+- [ ] 让 provider-specific parsing 与共享 selection、search、export 逻辑保持隔离。
+- [ ] 让 session discovery 在本地、镜像和共享 transcript 目录中更加稳健。
+- [ ] 在 CLI 命令、hotkey 和 TUI workspace 中一致暴露 provider selection。
+- [ ] 避免把数据模型绑定到单一 vendor 的 transcript 格式。
+
+## Skills and playbooks
+
+Skill 让 Agent 可以把 `sivtr` 当成共享记忆入口。它们把通用 memory 命令变成可复用流程，例如"修复最近的终端报错""从上次任务继续""按时间线总结最近工作"。
+
+- [x] 增加初始 `skills/sivtr-memory/` 包，包含命令配方、证据纪律、工作流和示例。
+- [x] 在文档中说明 skill 是产品模型的一部分，而不只是可选 prompt 片段。
+- [ ] 定义社区 skill 和团队 playbook 的稳定打包约定。
+- [ ] 建立 skill registry，让用户发现终端失败调试、timeline 生成、PR handoff、recap、onboarding 等 workflow。
+- [ ] 增加示例，展示 Agent 如何使用 ref 和验证证据。
+- [ ] 保持 skill procedure 基于现有 CLI 命令，避免社区玩法暗示还不存在的 `sivtr` 功能。
 
 ## TUI workspace
 
-TUI 要继续保持快速、键盘优先，但需要从单一输出浏览扩展到多来源 workspace 导航。
+TUI 应保持快速和键盘优先,但需要从单个输出浏览扩展到多 source workspace 导航。
 
-- [x] 用 Vim 风格 TUI 浏览捕获输出。
-- [x] 在捕获输出中搜索。
-- [x] 支持字符、行和块级选择。
-- [x] 交互式选择 session 和对话块。
-- [ ] 优化 workspace picker，使其能处理大量会话、多个 provider 和长对话。
-- [ ] 改进搜索范围、结果跳转和视觉反馈。
-- [ ] 统一终端输出、命令块和 AI 对话块之间的选择行为。
-- [ ] 改进 markdown、tool call 和结构化 agent 内容的渲染。
-- [ ] 保持界面高密度、可预测，并且对编辑器友好。
+- [x] 在 Vim 风格终端 UI 中浏览捕获输出。
+- [x] 搜索捕获输出。
+- [x] 选择字符、行和块范围。
+- [x] 交互式选择 session 和 dialogue block。
+- [ ] 优化大量 session、provider 和长对话场景下的 workspace picker。
+- [ ] 改进搜索 scope、结果导航和视觉反馈。
+- [ ] 统一终端输出、命令块和 Agent dialogue block 的选择行为。
+- [ ] 改进 markdown、tool call 和结构化 agent content 的渲染。
+- [ ] 保持界面高密度、可预测、editor-friendly。
+
+## Remote collaboration
+
+远程协作把 local memory 模型扩展到有权限的队友或远程 Agent 记录。目标不是默认变成托管 transcript 服务，而是让明确授权的协作者连接相关 chat/session 记录，使 Agent 能跨人和机器协作。
+
+- [ ] 在显式 opt-in 配置后支持远程或队友 memory source。
+- [ ] 跨远程记录保留 source ref 和 provenance。
+- [ ] 提供 selective disclosure 控制，避免敏感本地记忆被意外共享。
+- [ ] 让 Agent 能回答"另一个 Agent 已经试过什么？"或"我继续之前，给我看远程验证输出"。
+- [ ] 即使远程 source 可用，也保持 local-first 作为默认行为。
 
 ## sivtr-me
 
-当 CLI 和 workspace 基础稳定后，更大的方向是 `sivtr-me`：基于长期工作记录生成的个人资料层。它不是静态简历，而是从真实终端会话、AI 对话、项目历史和被用户选择过的工作产物中生成并持续更新。
+当 CLI 和 workspace foundation 稳定后,更大的方向是 `sivtr-me`:从累积工作记录生成个人 profile。它不像静态简历,而是持续从真实 terminal session、Agent conversation、project history 和选中 artifact 中更新,并由证据支撑。
 
 - [ ] 定义长期个人工作记录的本地数据模型。
-- [ ] 从真实记录中总结项目、工具、领域和工作方式。
-- [ ] 展示有代表性的对话、决策、代码修改、调试过程和交付结果。
-- [ ] 构建可公开或私有使用的资料页，用来回答“这个人实际做过什么”。
-- [ ] 支持选择性披露，让敏感记录留在本地，只分享高信号摘要。
-- [ ] 让每一条展示出来的判断都能追溯到原始 session 或 artifact。
+- [ ] 从真实记录总结项目、工具、领域和工作方式。
+- [ ] 展示代表性的 conversation、decision、code change、debug trace 和 shipped outcome。
+- [ ] 构建可公开或私有的 profile,用于回答"这个人实际做过什么?"
+- [ ] 支持 selective disclosure,让敏感记录保持本地,同时共享高信号 summary。
+- [ ] 为每个展示 claim 保留到源 session 或 artifact 的 provenance。
 
-## 非目标
+## Non-goals
 
-这份路线图不意味着 `sivtr` 会变成：
+Roadmap 不表示 `sivtr` 会变成:
 
-- 终端模拟器；
-- 默认托管 transcript 的云服务；
-- 某一个 AI 助手的专用 wrapper；
+- 终端模拟器;
+- 默认托管 transcript storage 服务；
+- 没有明确权限的远程 chat 镜像；
+- 某一个 AI assistant 的 vendor-specific wrapper;
 - source control、issue tracker 或笔记工具的替代品。
 
-`sivtr` 应该在边缘保持轻量，在核心保持结构化。
+`sivtr` 应该在边缘保持小,在核心保持结构化。
 
-## 原则
+## Principles
 
-- **先捕获。** 重要工作应该在发生时被记录，而不是事后靠记忆反推。
-- **默认本地。** 个人 transcript 和终端历史应由用户控制，除非用户显式导出。
-- **Provider 中立。** Agent 支持应建立在可替换 provider 和稳定共享抽象之上。
-- **CLI 可组合。** 只要可行，交互能力都应有对应的脚本化路径。
-- **重视来源。** 摘要、个人资料和导出内容应能追溯到原始会话和命令输出。
-- **对编辑器友好。** `sivtr` 应交给现有编辑器和工作流继续处理，而不是试图接管整个开发环境。
+- **Capture first.** 重要工作应该在发生时记录,而不是事后凭记忆重建。
+- **Local by default.** 个人 transcript 和 terminal history 应由用户控制,除非显式导出。
+- **Provider-neutral.** Agent support 应通过可替换 provider 和稳定共享抽象实现。
+- **Skills are interfaces.** Skill 是 Agent 学会操作共享记忆层的方式；它应该精确、可验证、以证据为先。
+- **Composable CLI.** 在可行时，每个交互特性都应有脚本化路径。
+- **Provenance matters.** Summary、profile 和 export 应能追溯到源 session 和命令输出。
+- **Editor-friendly.** `sivtr` 应交给已有编辑器和工作流,而不是试图拥有整个开发环境。

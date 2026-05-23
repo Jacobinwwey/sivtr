@@ -1,0 +1,103 @@
+---
+title: Data Locations
+description: Where sivtr stores configuration, history, session logs, and provider data.
+---
+
+`sivtr` is local-first. Most data it uses is already on your machine, and generated data is written under platform config or state directories unless you explicitly export it elsewhere.
+
+## Config file
+
+| Platform | Path |
+| --- | --- |
+| Windows | `%APPDATA%\sivtr\config.toml` |
+| macOS | `~/Library/Application Support/sivtr/config.toml` |
+| Linux | `~/.config/sivtr/config.toml` |
+
+If a legacy `sift/config.toml` exists and the current `sivtr` config does not, `sivtr` reads the legacy file for compatibility.
+
+## Shell session logs
+
+Shell integration writes per-process structured session logs.
+
+| Shell/platform | Typical path |
+| --- | --- |
+| Windows PowerShell / PowerShell 7 | `%APPDATA%\sivtr\session_<pid>.log` |
+| Bash / Zsh | `$XDG_STATE_HOME/sivtr/session_<pid>.log` or `~/.local/state/sivtr/session_<pid>.log` |
+| Nushell | Nushell config/state area with a `sivtr` session file |
+
+These logs power:
+
+- `sivtr import`;
+- `sivtr copy` command-block workflows;
+- `sivtr diff`;
+- command-block navigation in the browser.
+
+## History database
+
+Captured terminal output is stored in a local SQLite history database when `[history].auto_save = true`.
+
+Use CLI commands instead of editing the database directly:
+
+```bash
+sivtr history list
+sivtr history search "panic"
+sivtr history show 42
+```
+
+Retention is controlled by:
+
+```toml
+[history]
+max_entries = 0
+```
+
+`0` means unlimited.
+
+## Agent provider data
+
+`sivtr` reads provider-owned local data. It does not upload transcripts.
+
+| Provider | Data source |
+| --- | --- |
+| Codex | `~/.codex/sessions` rollout JSONL files |
+| Claude Code | Current transcript/session environment and local Claude transcripts |
+| OpenCode | OpenCode local database |
+| Pi | Pi agent session JSONL files |
+
+Provider formats differ; `sivtr` normalizes them into sessions and dialogue units for copy, picker, search, and show workflows.
+
+## Codex exported mirrors
+
+`codex export` writes a copy of local Codex session files into a destination you choose:
+
+```bash
+sivtr codex export --dest /srv/sivtr/root-codex
+```
+
+The destination receives a `sessions/` tree. Another account can read it by adding:
+
+```toml
+[codex]
+session_dirs = ["/srv/sivtr/root-codex/sessions"]
+```
+
+Use read-only permissions for shared mirrors when possible.
+
+## Generated launchers
+
+Linux shortcut generation writes:
+
+- `~/.local/bin/sivtr-pick-codex`;
+- `~/.local/share/applications/sivtr-pick-codex.desktop`.
+
+macOS shortcut generation writes:
+
+- `~/.local/bin/sivtr-pick-codex`;
+- `~/Library/LaunchAgents/dev.sivtr.pick-codex.plist`.
+
+Windows hotkey state is stored under `sivtr`'s platform config/state area and is managed by:
+
+```bash
+sivtr hotkey status
+sivtr hotkey stop
+```

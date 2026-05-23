@@ -60,9 +60,9 @@ To use `Ctrl+Y`, override the keybinding in VS Code Keyboard Shortcuts.
 ## Development
 
 ```bash
-pnpm install
-pnpm run compile
-pnpm run package
+bun install
+bun run compile
+bun run package
 ```
 
 Open this folder in VS Code and press `F5` to launch an Extension Development Host.

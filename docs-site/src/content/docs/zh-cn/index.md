@@ -1,51 +1,81 @@
 ---
 title: sivtr
-description: 面向 AI 时代的终端输出工作区。
+description: 面向人和 Agent 的 shared memory workspace。
 ---
 
-`sivtr` 把终端输出变成可复用的文本资产。你可以把命令输出管道到浏览器里，包装命令执行，搜索历史捕获，复制结构化命令块，或者直接从当前 Codex 会话里取出最有用的一轮内容，而不用手动打开原始 transcript。
+`sivtr` 是一个本地优先的 shared memory workspace，服务于人和 Agent。它把项目周围已经发生的工作——终端命令、命令输出、AI Agent 对话、工具结果和被复制的上下文——变成可搜索、可选择、可引用、可复用的记忆，让人和 Agent 都能重新使用。
 
-它不是终端模拟器、复用器，也不是替代 shell。它是一个放在现有终端旁边使用的工作台。
+它放在你已有的终端和 Agent 旁边，为这些本地工作提供一个共享记忆工作区。
 
-## 为什么需要它
+## sivtr 不是什么
 
-终端输出通常是一次性的。命令滚出屏幕后，有用的内容就困在 scrollback、复制模式或巨大的日志里。`sivtr` 给这些输出一个小型工作区：
+`sivtr` 不是：
 
-- 从 stdin、子进程或 shell 集成捕获输出；
-- 在 Vim 风格 TUI 里浏览输出；
-- 选择字符、行或块范围；
-- 用语义选择器复制最近的命令块；
-- 使用 SQLite FTS5 搜索已保存的输出；
-- 复用当前项目里的 Codex 对话块。
+- 终端模拟器；
+- tmux 替代品；
+- 云端 transcript 服务；
+- 另一个 Agent runtime。
 
-## 第一个命令
+## sivtr 解决什么问题
 
-从 crates.io 安装，然后把输出管道到 `sivtr`：
+- **捕获工作记忆**：来自管道、子进程、shell 集成和本地 Agent transcript。
+- **浏览和选择文本**：提供键盘优先的 Vim 风格 TUI。
+- **复制最近命令块**：可复制输入、输出、裸命令或完整块。
+- **复用 Agent 对话**：把 Codex、Claude Code、OpenCode 或 Pi 的对话变成项目记忆。
+- **让 Agent 学会使用同一份记忆**：通过 skill 和可复用流程，让"解决终端报错"从本地证据开始。
+- **搜索并展示 workspace ref**：覆盖终端上下文和 Agent session 记录。
+- **把精确上下文交给人或 Agent**：通过 ref、selector、filter 和 copy mode 复用内容。
+- **快速打开 memory picker**：支持 CLI、tmux、VS Code、Windows 热键和生成的桌面启动器。
+
+## 最先要会的命令
 
 ```bash
-cargo install sivtr
+# 把命令输出作为可复用 workspace memory 浏览。
 cargo test 2>&1 | sivtr
+
+# 让 sivtr 执行命令并捕获 stdout/stderr。
+sivtr run cargo test
+
+# 复制最近一次记录的命令输出。
+sivtr copy out
+
+# 复制某个 Agent provider 的最近回复。
+sivtr copy claude out
+sivtr copy codex out
+sivtr copy opencode out
+sivtr copy pi out
+
+# 搜索当前 workspace memory。
+sivtr search "panic"
 ```
-
-在浏览器里，用 `j` 和 `k` 移动，`/` 搜索，`v` 或 `V` 选择，`y` 复制，`q` 退出。
-
-## 常见工作流
-
-| 目标 | 命令 |
-| --- | --- |
-| 浏览命令输出 | `cargo test 2>&1 \| sivtr` |
-| 运行并捕获命令 | `sivtr run cargo test` |
-| 打开当前会话日志 | `sivtr import` |
-| 复制最近一次命令输出 | `sivtr copy out` |
-| 交互式选择一个或多个块 | `sivtr copy --pick` |
-| 复制 Codex 最新回复 | `sivtr copy codex out` |
-| 搜索已保存捕获 | `sivtr history search "panic"` |
-| 启动 Windows Codex 热键 | `sivtr hotkey start` |
 
 ## 文档地图
 
-- 从[安装](/zh-cn/start/installation/)和[快速开始](/zh-cn/start/quickstart/)开始。
-- 在[核心概念](/zh-cn/start/core-concepts/)里理解基本模型。
-- 在[使用 sivtr](/zh-cn/usage/capture-output/)下查看任务页。
-- 在 [CLI 参考](/zh-cn/reference/cli/)里查精确语法。
-- 在[架构](/zh-cn/explanation/architecture/)里了解实现结构。
+| 目标 | 从这里开始 |
+| --- | --- |
+| 安装 CLI | [安装](/zh-cn/start/installation/) |
+| 走一遍日常路径 | [快速开始](/zh-cn/start/quickstart/) |
+| 理解模型 | [心智模型](/zh-cn/start/core-concepts/) |
+| 捕获输出 | [捕获终端输出](/zh-cn/usage/capture-output/) |
+| 复制最近命令 | [复制命令块](/zh-cn/usage/copy-command-blocks/) |
+| 复用 Agent 记忆 | [Agent 会话](/zh-cn/usage/ai-sessions/) |
+| 让 Agent 学会 memory workflow | [Skill 与可复用流程](/zh-cn/usage/skills/) |
+| 查看社区玩法 | [玩法实例](/zh-cn/playbooks/) |
+| 搜索和按 ref 展示记忆 | [搜索和展示结果](/zh-cn/usage/search-and-show/) |
+| 快速打开 picker | [启动器和热键](/zh-cn/usage/launchers-and-hotkeys/) |
+| 查询精确语法 | [CLI 参考](/zh-cn/reference/cli/) |
+
+## 心智模型
+
+`sivtr` 分成两层：
+
+| 层 | 说明 |
+| --- | --- |
+| 记忆层 | 终端记录、Agent 对话、session、dialogue、command block 和 ref。 |
+| 使用层 | TUI 浏览、search、copy、show、diff、skill 和 playbook。 |
+
+终端 source 产生命令块，Agent provider 产生对话块。`1`、`2..4` 这样的 selector 用来选择最近记忆；`claude/<session>/3/2` 这样的 ref 用来让 `sivtr show` 精确取回搜索结果。
+
+## 默认本地优先
+
+`sivtr` 读取本地 shell 日志、本地 history 和本地 Agent transcript。共享 Codex 树需要显式 export 和配置。数据位置见 [数据位置](/zh-cn/reference/data-locations/)。

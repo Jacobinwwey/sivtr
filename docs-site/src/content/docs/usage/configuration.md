@@ -1,9 +1,9 @@
 ---
 title: Configuration
-description: Create, inspect, and edit sivtr configuration.
+description: Create, inspect, edit, and understand sivtr configuration.
 ---
 
-`sivtr` uses a TOML config file. The default path follows the platform config directory.
+`sivtr` uses a TOML config file in the platform config directory. Configuration controls open mode, editor handoff, history retention, prompt detection, Codex mirrors, and the Windows hotkey chord.
 
 ## Commands
 
@@ -43,7 +43,9 @@ session_dirs = []
 chord = "alt+y"
 ```
 
-## Open in an editor by default
+For a field-by-field reference, see [Config File](/reference/config-file/).
+
+## Open captured output in an editor
 
 ```toml
 [general]
@@ -55,6 +57,15 @@ command = "nvim"
 
 When `open_mode` is `editor`, pipe mode, run mode, and session import open captured text in the configured external editor instead of the built-in TUI.
 
+## Preserve colors
+
+```toml
+[general]
+preserve_colors = true
+```
+
+When enabled, the TUI can display ANSI colors where captured ANSI content is available. Plain-text copy and search remain stable.
+
 ## Prompt detection
 
 If your prompt is unusual, add literal prompt prefixes:
@@ -64,11 +75,21 @@ If your prompt is unusual, add literal prompt prefixes:
 prompts = ["dev>", "repo $", "PS C:\\repo>"]
 ```
 
-This helps command-block parsing identify the command input lines in session logs.
+This helps command-block parsing identify command input lines in session logs.
+
+## History retention
+
+```toml
+[history]
+auto_save = true
+max_entries = 0
+```
+
+`max_entries = 0` means unlimited. Set `auto_save = false` when you do not want pipe and run captures written to history automatically.
 
 ## Shared Codex session trees
 
-Add shared exported session trees when another account publishes a read-only copy:
+Add shared exported Codex session trees when another account publishes a read-only copy:
 
 ```toml
 [codex]
@@ -79,11 +100,23 @@ Create that shared tree from the source account with:
 
 ```bash
 sivtr codex export --dest /srv/sivtr/root-codex
+sivtr codex export --dest /srv/sivtr/root-codex --watch
 ```
 
-On macOS, a shared path under `/Users/Shared` works well:
+Only Codex currently has first-class shared mirror configuration. Other agent providers are read from their local provider-specific locations. See [Data Locations](/reference/data-locations/).
+
+## Hotkey chord
 
 ```toml
-[codex]
-session_dirs = ["/Users/Shared/sivtr/root-codex/sessions"]
+[hotkey]
+chord = "alt+y"
+```
+
+This chord is used by `sivtr hotkey start` unless overridden with `--chord`.
+
+Provider selection is a runtime CLI option, not a config key:
+
+```bash
+sivtr hotkey start --provider all
+sivtr hotkey start --provider claude
 ```

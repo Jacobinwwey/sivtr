@@ -1,11 +1,23 @@
 ---
-title: 捕获输出
-description: 使用管道模式、run 模式和会话日志。
+title: 捕获终端输出
+description: 使用 pipe mode、run mode 和 shell session import。
 ---
 
-## 管道模式
+捕获是把终端输出变成可复用文本的第一步。选择与你的需求匹配的最轻路径即可。
 
-管道模式读取 stdin 并打开结果。
+## 选择捕获方式
+
+| 场景 | 推荐命令 | 保留命令元数据？ |
+| --- | --- | --- |
+| 查看已有命令管道的输出 | `command 2>&1 \| sivtr` | 否 |
+| 让 `sivtr` 执行一次命令 | `sivtr run command` | 部分保留本次运行信息 |
+| 浏览当前 shell 记录的工作 | `sivtr import` | 是，需要 shell 集成 |
+| 复制最近命令块 | `sivtr copy out` | 是，需要 shell 集成 |
+| 搜索保存过的输出历史 | `sivtr history search "query"` | 是，针对保存的捕获 |
+
+## Pipe mode
+
+Pipe mode 读取 stdin 并打开结果。
 
 ```bash
 ls -la | sivtr
@@ -13,51 +25,63 @@ cargo build 2>&1 | sivtr
 rg "TODO" . | sivtr
 ```
 
-适合在以下场景使用：
+适合在这些情况下使用：
 
-- 命令已经在 shell 历史里；
-- 你希望保留普通 shell 的管道和重定向行为；
-- 不需要 `sivtr` 知道原始命令。
+- 命令已经存在于你的 shell 历史里；
+- 你希望保持普通 shell 的管道和重定向行为；
+- 不需要 `sivtr` 知道原始命令是什么。
 
-如果重要输出写到了 stderr，请重定向：
+如果重要输出写到了 stderr，把 stderr 重定向到 stdout：
 
 ```bash
 cargo test 2>&1 | sivtr
 ```
 
-## Run 模式
+## Run mode
 
-Run 模式通过 `sivtr` 执行命令：
+Run mode 由 `sivtr` 执行命令：
 
 ```bash
 sivtr run cargo test
 sivtr run git status --short
 ```
 
-适合在以下场景使用：
+适合在这些情况下使用：
 
-- 希望 `sivtr` 直接捕获命令；
-- 希望浏览前打印退出状态；
-- 不想手动处理 shell 重定向。
+- 你希望 `sivtr` 执行并捕获单个命令；
+- 你希望浏览前看到退出状态；
+- 你不想手动处理 shell 重定向。
 
-Run 模式捕获合并后的输出。如果命令没有产生输出，`sivtr` 会报告没有捕获内容后退出。
+Run mode 会合并捕获 stdout 和 stderr。如果命令没有输出，`sivtr` 会提示没有捕获内容后退出。
 
-## 会话导入
+## Shell session import
 
-安装 shell 集成后，`sivtr import` 会打开当前会话日志：
+Shell 集成会持续记录结构化命令条目。安装后打开当前 session log：
 
 ```bash
 sivtr import
 ```
 
-当你已经正常工作了一段时间，后来想把累积会话作为一个工作区浏览时，这很有用。
+当你已经正常工作了一段时间，之后想把累积的 session 当成一个工作区浏览时，这很有用。
 
-## 选择捕获路径
+安装 shell 集成：
 
-| 使用场景 | 最佳命令 |
-| --- | --- |
-| 检查单个命令输出 | `command 2>&1 \| sivtr` |
-| 通过工具运行命令 | `sivtr run command` |
-| 浏览这个 shell 里记录的一切 | `sivtr import` |
-| 不打开 TUI，复制最近命令块 | `sivtr copy out` |
-| 搜索已保存捕获 | `sivtr history search "query"` |
+```bash
+sivtr init powershell
+sivtr init bash
+sivtr init zsh
+sivtr init nushell
+```
+
+安装后重启 shell。
+
+## History capture
+
+当 `[history].auto_save` 启用时，捕获输出会保存到本地 history。稍后可以搜索：
+
+```bash
+sivtr history search "panic"
+sivtr history show 42
+```
+
+History 和当前 shell session log 是两套东西：history 是更长期的 SQLite 存储，session log 是按 shell 进程记录的近期结构化命令块。

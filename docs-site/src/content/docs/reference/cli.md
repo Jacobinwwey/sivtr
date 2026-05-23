@@ -1,9 +1,9 @@
 ---
 title: CLI Reference
-description: Command syntax, subcommands, options, selectors, and examples.
+description: Command syntax, subcommands, options, providers, selectors, and examples.
 ---
 
-This page documents the public CLI surface. Keep it aligned with `src/cli.rs`.
+This page documents the public CLI surface. The source of truth is `src/cli.rs`; run `sivtr --help` and `sivtr <command> --help` for installed-version help.
 
 ## Top-level
 
@@ -19,9 +19,7 @@ If no command is provided, `sivtr` reads from stdin, matching pipe mode.
 sivtr run <COMMAND> [ARGS...]
 ```
 
-Runs a command, captures combined output, reports the exit status, and opens the captured output.
-
-Examples:
+Runs a command, captures combined stdout/stderr, reports the exit status, saves history when enabled, and opens the captured output.
 
 ```bash
 sivtr run cargo test
@@ -34,7 +32,7 @@ sivtr run git status --short
 sivtr pipe
 ```
 
-Reads stdin and opens it. In normal use, piping directly to `sivtr` is equivalent:
+Reads stdin and opens it. Piping directly to `sivtr` is equivalent:
 
 ```bash
 cargo build 2>&1 | sivtr
@@ -46,25 +44,26 @@ cargo build 2>&1 | sivtr
 sivtr import
 ```
 
-Opens the current structured session log. Requires shell integration.
+Opens the current structured shell session log. Requires shell integration.
 
 ## init
 
 ```bash
-sivtr init <SHELL>
+sivtr init <TARGET>
 ```
 
-Supported shell names:
+Supported targets:
 
-- `powershell`
-- `pwsh`
-- `bash`
-- `zsh`
-- `nushell`
-- `nu`
-- `tmux`
-- `linux-shortcut`
-- `macos-shortcut`
+| Target | Purpose |
+| --- | --- |
+| `powershell` | Install Windows PowerShell hook |
+| `pwsh` | Alias for PowerShell integration |
+| `bash` | Install Bash hook |
+| `zsh` | Install Zsh hook |
+| `nushell` / `nu` | Install Nushell hook |
+| `tmux` | Install tmux picker binding |
+| `linux-shortcut` | Generate Linux desktop/terminal picker launcher |
+| `macos-shortcut` | Generate macOS Terminal/LaunchAgent picker launcher |
 
 ## copy
 
@@ -72,7 +71,7 @@ Supported shell names:
 sivtr copy [MODE] [SELECTOR] [OPTIONS]
 ```
 
-Modes:
+Command-block modes:
 
 | Mode | Meaning |
 | --- | --- |
@@ -80,16 +79,15 @@ Modes:
 | `in` | Copy input |
 | `out` | Copy output |
 | `cmd` | Copy bare command |
-| `codex` | Copy Codex session content |
 
 Aliases:
 
 | Alias | Expands to |
 | --- | --- |
-| `c` | `copy` |
-| `ci` | `copy in` |
-| `co` | `copy out` |
-| `cc` | `copy cmd` |
+| `sivtr c` | `sivtr copy` |
+| `sivtr ci` | `sivtr copy in` |
+| `sivtr co` | `sivtr copy out` |
+| `sivtr cc` | `sivtr copy cmd` |
 
 Common options:
 
@@ -118,32 +116,47 @@ sivtr copy out --pick --regex panic
 sivtr copy cmd --pick
 ```
 
-## copy codex
+## copy agent provider sessions
 
 ```bash
-sivtr copy codex [MODE] [SELECTOR] [OPTIONS]
+sivtr copy <PROVIDER> [MODE] [SELECTOR] [OPTIONS]
 ```
+
+Providers:
+
+| Provider | Command |
+| --- | --- |
+| Codex | `sivtr copy codex` |
+| Claude Code | `sivtr copy claude` |
+| OpenCode | `sivtr copy opencode` |
+| Pi | `sivtr copy pi` |
 
 Modes:
 
 | Mode | Meaning |
 | --- | --- |
-| no mode | Last completed user plus assistant turn |
-| `out` | Last assistant reply |
+| no mode | Last completed user + assistant turn |
 | `in` | Last user message |
+| `out` | Last assistant reply |
 | `tool` | Last tool output |
 | `all` | Whole parsed session |
+
+Agent copy options include all common copy options plus:
+
+| Option | Meaning |
+| --- | --- |
+| `--session <N|ID>` | Select the Nth newest selectable session, or match an id/id prefix |
 
 Examples:
 
 ```bash
-sivtr copy codex
-sivtr copy codex 2
+sivtr copy claude
+sivtr copy claude out --print
+sivtr copy claude --session 2
 sivtr copy codex 2..4
-sivtr copy codex out --print
 sivtr copy codex out --pick
-sivtr copy codex tool --regex error
-sivtr copy codex all --lines 1:20
+sivtr copy opencode all --lines 1:20
+sivtr copy pi tool --regex error
 ```
 
 ## diff
@@ -152,9 +165,9 @@ sivtr copy codex all --lines 1:20
 sivtr diff <LEFT> <RIGHT> [OPTIONS]
 ```
 
-Compares two recent command blocks from the current session. Each selector must resolve to exactly one block.
+Compares two recent command blocks from the current shell session. Each selector must resolve to exactly one block.
 
-Content modes:
+Content options:
 
 | Option | Meaning |
 | --- | --- |
@@ -177,6 +190,63 @@ sivtr diff 3 1 --block
 sivtr diff 2 1 --side-by-side
 ```
 
+## search
+
+```bash
+sivtr search <QUERY> [OPTIONS]
+```
+
+Searches current-workspace agent sessions and the current terminal session log when shell integration has data.
+
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--scope <SCOPE>` | `content`, `dialogue`, or `session`; default is `content` |
+| `--provider <PROVIDER>` | `all`, `codex`, `claude`, `opencode`, or `pi`; default is `all` |
+| `--cwd <PATH>` | Workspace directory used to resolve sessions |
+| `-l, --limit <N>` | Maximum results to print; default is `20` |
+| `--json` | Print machine-readable JSON |
+
+Examples:
+
+```bash
+sivtr search panic
+sivtr search "workspace picker" --scope dialogue
+sivtr search sivtr --scope session --provider codex
+sivtr search "build error" --json --limit 20
+```
+
+## show
+
+```bash
+sivtr show <REF> [OPTIONS]
+```
+
+Prints a workspace ref from an agent provider or the current terminal session.
+
+Ref syntax:
+
+```text
+source/session[/dialogue[/line]]
+```
+
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--cwd <PATH>` | Workspace directory used to resolve sessions |
+| `--json` | Print machine-readable JSON |
+
+Examples:
+
+```bash
+sivtr show claude/<session-id>
+sivtr show claude/<session-id>/3
+sivtr show claude/<session-id>/3/7 --json
+sivtr show terminal/current/2
+```
+
 ## history
 
 ```bash
@@ -188,10 +258,10 @@ Subcommands:
 | Command | Meaning |
 | --- | --- |
 | `list [-l, --limit <N>]` | List recent entries |
-| `search <KEYWORD> [-l, --limit <N>]` | Search history |
-| `show <ID>` | Show a specific entry |
+| `search <KEYWORD> [-l, --limit <N>]` | Search saved capture history |
+| `show <ID>` | Show a specific history entry |
 
-If no history subcommand is provided, `sivtr` lists the latest 20 entries.
+If no history subcommand is provided, `list` is used.
 
 ## config
 
@@ -219,11 +289,47 @@ Subcommands:
 
 | Command | Meaning |
 | --- | --- |
-| `start [--chord <CHORD>]` | Start Windows hotkey daemon |
+| `start [--chord <CHORD>] [--provider <PROVIDER>]` | Start Windows global hotkey daemon |
 | `status` | Show daemon status |
 | `stop` | Stop daemon |
 
 If no hotkey subcommand is provided, `status` is used.
+
+Examples:
+
+```bash
+sivtr hotkey start
+sivtr hotkey start --chord alt+y
+sivtr hotkey start --provider claude
+sivtr hotkey status
+sivtr hotkey stop
+```
+
+## codex export
+
+```bash
+sivtr codex export --dest <PATH> [OPTIONS]
+```
+
+Exports local Codex rollout JSONL files into a target directory containing a `sessions/` tree.
+
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--dest <PATH>` | Destination directory that will receive the `sessions/` tree |
+| `--limit <N>` | Keep only newest N session files; `0` means export all |
+| `--watch` | Continue mirroring local sessions |
+| `--interval <SECONDS>` | Seconds between sync passes when watching; default is `1` |
+| `--interval-ms <MILLISECONDS>` | Milliseconds between sync passes; overrides `--interval` |
+
+Examples:
+
+```bash
+sivtr codex export --dest /srv/sivtr/root-codex
+sivtr codex export --dest /srv/sivtr/root-codex --watch
+sivtr codex export --dest /srv/sivtr/root-codex --limit 100
+```
 
 ## clear
 
@@ -231,15 +337,8 @@ If no hotkey subcommand is provided, `status` is used.
 sivtr clear [--all]
 ```
 
-Clears session logs. `--all` clears all recorded session logs and state files.
+Clears current shell session logs. `--all` clears all recorded session logs and state files managed by `sivtr`.
 
-## Selector syntax
+## Shared syntax
 
-| Selector | Meaning |
-| --- | --- |
-| omitted | `1` |
-| `1` | Latest matching item |
-| `2` | Second latest matching item |
-| `2..4` | Recent range |
-
-Selector semantics are shared by command-block copy, Codex copy, and diff where applicable.
+See [Selectors and Filters](/reference/selectors-and-filters/) for recency selectors, `--session`, providers, `--regex`, `--lines`, `--ansi`, `--print`, and workspace refs.

@@ -1,49 +1,65 @@
 ---
-title: 发布说明
-description: sivtr 发布说明和 changelog 约定。
+title: Release Notes
+description: sivtr 面向用户的发布说明。
 ---
 
-这里作为公开发布说明入口。项目开始持续打 tag 后，详细版本条目应保存在 `CHANGELOG.md`。
+`sivtr` 仍处在早期 `0.1.x` 开发阶段。本系列中 CLI 和配置格式仍可能变化。本页总结用户可见变更；仓库中的 `CHANGELOG.md` 仍是更详细的 changelog 来源。
 
-## 当前状态
+## 0.1.3 - 2026-05-20
 
-`sivtr` 处于早期 `0.1.x` 开发阶段。当前文档覆盖的功能包括：
+### Added
 
-- pipe 和 run 捕获模式；
-- Vim 风格 TUI 浏览和选择；
-- 结构化 shell 会话日志；
-- 命令块复制、diff 和选择器工作流；
-- Codex 会话复制工作流；
-- SQLite 历史搜索；
+- 新增用于浏览 AI session 的 workspace picker 体验，包括更丰富的内容渲染、搜索导航、滚动和带行号的内容视图。
+- 新增 AI session workspace copy 快捷键：`i` 复制用户输入，`o` 复制助手输出，`y` 复制不带 role heading 的完整 dialogue block。
+- 新增项目 roadmap 文档页面。
+
+### Fixed
+
+- 加固 VS Code picker command 在 PowerShell、cmd.exe、fish 和 POSIX shells 中的 quoting。
+- 忽略 Claude `ai-title` metadata event，避免 session parsing 失败。
+- 修复 CI clippy warnings。
+
+## 0.1.2 - 2026-05-02
+
+### Fixed
+
+- 将取消交互式 picker 视为正常退出。
+
+## 0.1.1 - 2026-05-01
+
+### Fixed
+
+- 修复 Codex copy picker TUI 选择逻辑。
+- 修复 terminal exit handling，避免终端卡住。
+
+## 0.1.0 - 2026-04-28
+
+### Added
+
+- 新增 `sivtr`：用于捕获命令输出和 AI coding session 的终端输出 workspace。
+- 新增 pipe mode：`command | sivtr`。
+- 新增 run mode：`sivtr run <command>`。
+- 新增 Vim 风格导航、modal interaction、visual selection、搜索和剪贴板复制。
+- 新增带 full-text search 的本地 SQLite history。
+- 新增 Codex session capture helper：通过 `sivtr copy codex` 复用 assistant reply、user prompt 和 tool output。
+- 新增命令块 copy、diff 和 picker 工作流。
+- 新增 TOML 配置支持。
+- 新增 Windows 全局热键支持，用于 Codex picker 工作流。
+
+### Notes
+
+- 这是第一个公开版本。CLI 和配置格式在 `0.1.x` 系列中仍可能变化。
+
+## 当前文档覆盖范围
+
+当前文档覆盖：
+
+- 终端 pipe 和 run capture；
+- shell session logging；
+- TUI 浏览和选择；
+- 命令块 copy 和 diff；
+- Codex、Claude Code、OpenCode 和 Pi 的 AI session copy 与 picker 工作流；
+- workspace search 和 show refs；
+- SQLite terminal history；
 - TOML 配置；
-- Windows 全局 Codex 选择器热键。
-
-## 建议 changelog 格式
-
-```markdown
-## [Unreleased]
-
-### Added
-
-### Changed
-
-### Fixed
-
-### Removed
-```
-
-每个发布版本写明日期和面向用户的变化：
-
-```markdown
-## [0.1.1] - 2026-04-28
-
-### Added
-
-- Added `sivtr copy codex out --pick`.
-
-### Fixed
-
-- Fixed prompt rendering for multiline prompts.
-```
-
-发布说明应写给用户看，不要直接堆原始 commit message。
+- Windows hotkey、VS Code、tmux、Linux shortcut 和 macOS launcher 流程。

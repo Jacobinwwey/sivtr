@@ -1,9 +1,11 @@
 ---
 title: Keybindings
-description: TUI, picker, and Vim-view keybindings.
+description: Browser, command-block, picker, search, line-filter, and Vim-view keybindings.
 ---
 
 ## Browser
+
+The browser is used by pipe mode, run mode, and session import.
 
 | Key | Mode | Action |
 | --- | --- | --- |
@@ -52,21 +54,70 @@ Only available when the buffer has parsed command blocks.
 | `mvi` | Select current command input |
 | `mvo` | Select current command output |
 
-## Copy picker
+## Workspace picker
+
+The workspace picker is used by agent-session pickers and command-block pickers.
 
 | Key | Action |
 | --- | --- |
-| `j` / `Down` | Move down |
-| `k` / `Up` | Move up |
-| `Space` | Toggle current entry |
-| `v` | Mark range anchor |
-| `a` | Toggle all |
+| `0` | Focus Source pane |
+| `1` | Focus Sessions pane |
+| `2` | Focus Dialogues pane |
+| `3` | Focus Content pane |
+| `j` / `Down` | Move down in focused pane |
+| `k` / `Up` | Move up in focused pane |
+| `h` / `Left` | Focus previous pane |
+| `l` / `Right` | Focus next pane |
+| `Space` | Toggle current source, session, or dialogue |
+| `a` | Select all sources or toggle all dialogues, depending on pane |
+| `g` | Select agent sources in Source pane |
+| `t` | Select terminal source in Source pane, or open Vim-style full view elsewhere |
+| `v` | Range-select dialogues, or start visual text selection in Content pane |
 | `:` | Start a temporary line filter for the next copy |
-| `p` | Toggle preview |
-| `t` | Open Vim-style full view |
-| `Enter` | Confirm |
-| `Backspace` | Edit the pending line filter |
-| `Esc` | Cancel |
+| `i` | Copy input/question |
+| `o` | Copy output/answer |
+| `y` | Copy input + output block |
+| `c` | Copy bare command when available |
+| `Enter` | Enter pane or copy current selection |
+| `Ctrl-D` / `PageDown` | Scroll Content down |
+| `Ctrl-U` / `PageUp` | Scroll Content up |
+| `r` | Toggle raw/read content mode in Content pane |
+| `z` | Toggle focused pane fullscreen |
+| `/` | Search all sessions |
+| `?` | Open help |
+| `q` / `Esc` | Cancel or go back |
+
+## Workspace search
+
+| Key | Action |
+| --- | --- |
+| `/` | Open search input |
+| `Enter` | Accept search input |
+| `Esc` | Clear or close search |
+| `Backspace` | Edit query while input is open |
+| `n` | Next match |
+| `N` | Previous match |
+
+Search prefixes:
+
+| Prefix | Scope |
+| --- | --- |
+| none | Content |
+| `#` | Dialogue titles |
+| `>` | Session titles |
+
+## Line filter input
+
+Opened from the workspace picker with `:`.
+
+| Key | Action |
+| --- | --- |
+| digits, `,`, `:` | Build a 1-based line spec |
+| `Backspace` | Edit pending filter |
+| `Enter` | Apply to the next copy |
+| `Esc` | Clear/cancel |
+
+Examples: `2:8`, `1,3,8:12`.
 
 ## Vim-style full view
 

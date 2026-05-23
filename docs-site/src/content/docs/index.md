@@ -1,51 +1,81 @@
 ---
 title: sivtr
-description: Terminal output workspace for the AI era.
+description: A shared memory workspace for humans and agents.
 ---
 
-`sivtr` turns terminal output into reusable text. Pipe output into a browser, wrap command execution, search across past captures, copy structured command blocks, or pull the last useful turn out of a Codex session without opening the transcript by hand.
+`sivtr` is a local-first shared memory workspace for humans and agents. It turns the work around a project—terminal commands, command output, AI-agent conversations, tool results, and copied context—into searchable, selectable, referenceable memory that both you and your agents can reuse.
 
-It is not a terminal emulator, multiplexer, or replacement shell. It works beside the terminal you already use.
+Use it beside the terminals and agents you already have. It gives their local work one shared memory workspace.
 
-## Why it exists
+## What sivtr is not
 
-Terminal output is usually treated as disposable. Once a command scrolls away, the useful part is trapped in scrollback, copy mode, or a giant log. `sivtr` gives that output a small workspace:
+`sivtr` is not:
 
-- capture output from stdin, subprocesses, or shell integration;
-- browse output in a Vim-style TUI;
-- select character, line, or block ranges;
-- copy recent command blocks by semantic selector;
-- search saved output with SQLite FTS5;
-- reuse Codex conversation blocks from the current project.
+- a terminal emulator;
+- a tmux replacement;
+- a hosted transcript service;
+- another agent runtime.
 
-## First command
+## What sivtr helps with
 
-Install from crates.io, then pipe output into `sivtr`:
+- **Capture working memory** from pipes, subprocesses, shell integration, and local agent transcripts.
+- **Browse and select text** in a keyboard-first Vim-style TUI.
+- **Copy recent command blocks** as input, output, bare command, or full block.
+- **Reuse agent dialogue** from Codex, Claude Code, OpenCode, or Pi as project memory.
+- **Teach agents to use the same memory** through skills and reusable procedures, so "fix the terminal error" can start from local evidence.
+- **Search and show workspace refs** across terminal context and agent-session records.
+- **Hand exact context to humans or agents** with stable refs, selectors, filters, and copy modes.
+- **Launch memory pickers** from the terminal, tmux, VS Code, Windows hotkeys, or generated desktop shortcuts.
+
+## First useful commands
 
 ```bash
-cargo install sivtr
+# Browse command output as reusable workspace memory.
 cargo test 2>&1 | sivtr
-```
 
-Inside the browser, use `j` and `k` to move, `/` to search, `v` or `V` to select, `y` to copy, and `q` to quit.
+# Let sivtr run the command and capture combined output.
+sivtr run cargo test
+
+# Copy the latest recorded command output.
+sivtr copy out
+
+# Copy the latest assistant answer from an agent provider.
+sivtr copy claude out
+sivtr copy codex out
+sivtr copy opencode out
+sivtr copy pi out
+
+# Search current workspace memory.
+sivtr search "panic"
+```
 
 ## Common workflows
 
-| Goal | Command |
+| Goal | Start here |
 | --- | --- |
-| Browse command output | `cargo test 2>&1 \| sivtr` |
-| Run and capture a command | `sivtr run cargo test` |
-| Open the current session log | `sivtr import` |
-| Copy the latest command output | `sivtr copy out` |
-| Pick one or more recent blocks | `sivtr copy --pick` |
-| Copy the latest assistant reply from Codex | `sivtr copy codex out` |
-| Search saved captures | `sivtr history search "panic"` |
-| Start the Windows AI session hotkey | `sivtr hotkey start` |
+| Install the CLI | [Installation](/start/installation/) |
+| Learn the daily path | [Quickstart](/start/quickstart/) |
+| Understand the model | [Mental Model](/start/core-concepts/) |
+| Capture output | [Capture Terminal Output](/usage/capture-output/) |
+| Copy recent commands | [Copy Command Blocks](/usage/copy-command-blocks/) |
+| Reuse agent memory | [Work with AI Sessions](/usage/ai-sessions/) |
+| Teach agents the memory workflow | [Skills and Reusable Procedures](/usage/skills/) |
+| See practical community workflows | [Playbooks](/playbooks/) |
+| Search and dereference memory | [Search and Show Results](/usage/search-and-show/) |
+| Open pickers quickly | [Launch Pickers and Hotkeys](/usage/launchers-and-hotkeys/) |
+| Check exact syntax | [CLI Reference](/reference/cli/) |
 
-## Documentation map
+## Mental model
 
-- Start with [Installation](/start/installation/) and [Quickstart](/start/quickstart/).
-- Learn the mental model in [Core Concepts](/start/core-concepts/).
-- Use task pages under [Use sivtr](/usage/capture-output/).
-- Keep exact syntax open in [CLI Reference](/reference/cli/).
-- Read the implementation shape in [Architecture](/explanation/architecture/).
+`sivtr` has two layers:
+
+| Layer | What it describes |
+| --- | --- |
+| Memory layer | Terminal records, agent conversations, sessions, dialogues, command blocks, and refs. |
+| Use layer | TUI browsing, search, copy, show, diff, skills, and playbooks. |
+
+Terminal sources produce command blocks. Agent providers produce dialogue blocks. Selectors like `1` and `2..4` pick recent memory for copy commands. Refs like `claude/<session>/3/2` identify exact search results for `sivtr show`.
+
+## Local by default
+
+`sivtr` reads local shell logs, local history, and local agent transcripts. Shared Codex trees are opt-in through explicit export and configuration. See [Data Locations](/reference/data-locations/) for where records live.
