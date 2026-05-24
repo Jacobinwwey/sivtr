@@ -1,8 +1,11 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use regex::Regex;
 use serde::Serialize;
-use sivtr_core::ai::AgentProvider;
+use sivtr_core::ai::{AgentProvider, AgentSessionProvider};
 use sivtr_core::record::{RecordTextMode, WorkOutcome, WorkRecord, WorkRecordKind, WorkRef};
 
 use crate::cli::{SearchArgs, SearchFieldArg, SearchSortArg, SearchStatusArg};
@@ -22,9 +25,20 @@ struct SearchJsonOutput<'a> {
 }
 
 #[derive(Serialize)]
+struct SearchJsonMatch {
+    #[serde(rename = "ref")]
+    ref_: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    snippet: String,
+}
+
+#[derive(Serialize)]
 struct SearchJsonItem {
     #[serde(rename = "ref")]
     ref_: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_ref: Option<String>,
     timestamp: Option<String>,
     dialogue: String,
     status: WorkOutcome,
@@ -32,11 +46,27 @@ struct SearchJsonItem {
     exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     duration_ms: Option<u64>,
+    matches: Vec<SearchJsonMatch>,
+}
+
+struct SearchResultGroup<'a> {
+    record: &'a WorkRecord,
+    ref_: String,
+    matches: Vec<SearchLineMatch>,
+}
+
+#[derive(Clone)]
+struct SearchLineMatch {
+    ref_: String,
+    line: Option<usize>,
+    snippet: String,
 }
 
 struct SearchMatch<'a> {
     record: &'a WorkRecord,
     ref_: String,
+    line: Option<usize>,
+    snippet: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +98,11 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         now,
     )?;
     let records = current_work_record_index(&providers, &cwd, None)?;
+    let excluded_sessions = if args.exclude_current {
+        current_agent_session_paths(&providers, &cwd)?
+    } else {
+        HashSet::new()
+    };
     let regex = args
         .match_
         .as_deref()
@@ -80,25 +115,27 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
             bail!("--min-duration must be less than or equal to --max-duration");
         }
     }
-    let mut results = records
+    let mut matches = records
         .records()
         .iter()
         .filter(|record| {
             target.matches(record)
+                && !excluded_session_matches(record, &excluded_sessions)
                 && status_matches(args.status, record.status.outcome)
                 && exit_code_matches(args.exit_code, record.status.exit_code)
                 && duration_matches(min_duration_ms, max_duration_ms, record.time.duration_ms)
-                && time_range.as_ref().is_none_or(|range| {
-                    range.contains_record_time(record.time.occurred_at.as_deref())
-                })
+                && time_range
+                    .as_ref()
+                    .is_none_or(|range| range.contains_record_time(record.time.primary_at()))
         })
         .flat_map(|record| matching_refs(record, &target, args.in_field, regex.as_ref()))
         .collect::<Vec<_>>();
-    sort_results(&mut results, SearchSortArg::Newest);
+    sort_results(&mut matches, SearchSortArg::Newest);
+    let mut results = group_results(matches);
     if let Some(latest) = args.latest {
         results.truncate(latest);
     }
-    sort_results(&mut results, args.sort);
+    sort_group_results(&mut results, args.sort);
     if let Some(limit) = args.limit.or_else(|| args.latest.is_none().then_some(20)) {
         results.truncate(limit);
     }
@@ -125,6 +162,12 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
     for result in results {
         println!("{}", result.ref_);
         println!("  {}", result.record.title);
+        for matched in result.matches {
+            match matched.line {
+                Some(line) => println!("  - {} line {}: {}", matched.ref_, line, matched.snippet),
+                None => println!("  - {}: {}", matched.ref_, matched.snippet),
+            }
+        }
     }
 
     Ok(())
@@ -379,7 +422,19 @@ fn matching_refs<'a>(
             .line_index
             .map(|line| record.work_ref.with_line(line).to_string())
             .unwrap_or_else(|| record.work_ref.to_string());
-        return vec![SearchMatch { record, ref_ }];
+        return vec![SearchMatch {
+            record,
+            ref_: ref_.clone(),
+            line: target.line_index,
+            snippet: match target.line_index {
+                Some(line) => combined_text(record)
+                    .lines()
+                    .nth(line - 1)
+                    .map(snippet)
+                    .unwrap_or_default(),
+                None => record_snippet(record, field),
+            },
+        }];
     };
 
     if let Some(line) = target.line_index {
@@ -389,6 +444,8 @@ fn matching_refs<'a>(
             return vec![SearchMatch {
                 record,
                 ref_: record.work_ref.with_line(line).to_string(),
+                line: Some(line),
+                snippet: snippet(text),
             }];
         }
         return Vec::new();
@@ -399,9 +456,11 @@ fn matching_refs<'a>(
             .lines()
             .enumerate()
             .filter(|(_, line)| regex.is_match(line))
-            .map(|(idx, _)| SearchMatch {
+            .map(|(idx, line)| SearchMatch {
                 record,
                 ref_: record.work_ref.with_line(idx + 1).to_string(),
+                line: Some(idx + 1),
+                snippet: snippet(line),
             })
             .collect::<Vec<_>>();
         if !matches.is_empty() {
@@ -413,6 +472,8 @@ fn matching_refs<'a>(
         return vec![SearchMatch {
             record,
             ref_: record.work_ref.to_string(),
+            line: None,
+            snippet: record_snippet(record, field),
         }];
     }
 
@@ -449,15 +510,15 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
         SearchSortArg::Newest => results.sort_by(|a, b| {
             b.record
                 .time
-                .occurred_at
-                .cmp(&a.record.time.occurred_at)
+                .primary_at()
+                .cmp(&a.record.time.primary_at())
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::Oldest => results.sort_by(|a, b| {
             a.record
                 .time
-                .occurred_at
-                .cmp(&b.record.time.occurred_at)
+                .primary_at()
+                .cmp(&b.record.time.primary_at())
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::Duration => results.sort_by(|a, b| {
@@ -465,7 +526,7 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
                 .time
                 .duration_ms
                 .cmp(&a.record.time.duration_ms)
-                .then_with(|| b.record.time.occurred_at.cmp(&a.record.time.occurred_at))
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::DurationAsc => results.sort_by(|a, b| {
@@ -473,7 +534,7 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
                 .time
                 .duration_ms
                 .cmp(&b.record.time.duration_ms)
-                .then_with(|| b.record.time.occurred_at.cmp(&a.record.time.occurred_at))
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::ExitCode => results.sort_by(|a, b| {
@@ -481,7 +542,7 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
                 .status
                 .exit_code
                 .cmp(&a.record.status.exit_code)
-                .then_with(|| b.record.time.occurred_at.cmp(&a.record.time.occurred_at))
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::ExitCodeAsc => results.sort_by(|a, b| {
@@ -489,7 +550,7 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
                 .status
                 .exit_code
                 .cmp(&b.record.status.exit_code)
-                .then_with(|| b.record.time.occurred_at.cmp(&a.record.time.occurred_at))
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
     }
@@ -499,14 +560,202 @@ fn combined_text(record: &WorkRecord) -> String {
     record.copy_text(RecordTextMode::Combined, false).plain
 }
 
-fn search_json_item(result: SearchMatch<'_>) -> SearchJsonItem {
+fn group_results(matches: Vec<SearchMatch<'_>>) -> Vec<SearchResultGroup<'_>> {
+    let mut results: Vec<SearchResultGroup<'_>> = Vec::new();
+
+    for matched in matches {
+        let record_ref = matched.record.work_ref.record_ref().to_string();
+        if let Some(group) = results.iter_mut().find(|group| group.ref_ == record_ref) {
+            group.matches.push(SearchLineMatch {
+                ref_: matched.ref_,
+                line: matched.line,
+                snippet: matched.snippet,
+            });
+        } else {
+            results.push(SearchResultGroup {
+                record: matched.record,
+                ref_: record_ref.clone(),
+                matches: vec![SearchLineMatch {
+                    ref_: matched.ref_,
+                    line: matched.line,
+                    snippet: matched.snippet,
+                }],
+            });
+        }
+    }
+
+    results
+}
+
+fn sort_group_results(results: &mut [SearchResultGroup<'_>], sort: SearchSortArg) {
+    match sort {
+        SearchSortArg::Newest => results.sort_by(|a, b| {
+            b.record
+                .time
+                .primary_at()
+                .cmp(&a.record.time.primary_at())
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+        SearchSortArg::Oldest => results.sort_by(|a, b| {
+            a.record
+                .time
+                .primary_at()
+                .cmp(&b.record.time.primary_at())
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+        SearchSortArg::Duration => results.sort_by(|a, b| {
+            b.record
+                .time
+                .duration_ms
+                .cmp(&a.record.time.duration_ms)
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+        SearchSortArg::DurationAsc => results.sort_by(|a, b| {
+            a.record
+                .time
+                .duration_ms
+                .cmp(&b.record.time.duration_ms)
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+        SearchSortArg::ExitCode => results.sort_by(|a, b| {
+            b.record
+                .status
+                .exit_code
+                .cmp(&a.record.status.exit_code)
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+        SearchSortArg::ExitCodeAsc => results.sort_by(|a, b| {
+            a.record
+                .status
+                .exit_code
+                .cmp(&b.record.status.exit_code)
+                .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
+                .then_with(|| a.ref_.cmp(&b.ref_))
+        }),
+    }
+}
+
+fn current_agent_session_paths(
+    providers: &[AgentProvider],
+    cwd: &Path,
+) -> Result<HashSet<PathBuf>> {
+    let mut paths = HashSet::new();
+
+    for provider in providers {
+        let source = provider.session_provider();
+        if let Some(path) = current_agent_session_path(source.as_ref(), *provider, cwd)? {
+            paths.insert(comparable_path(&path));
+        }
+    }
+
+    Ok(paths)
+}
+
+fn current_agent_session_path(
+    source: &dyn AgentSessionProvider,
+    provider: AgentProvider,
+    cwd: &Path,
+) -> Result<Option<PathBuf>> {
+    if let Some(path) = current_agent_transcript_path(provider) {
+        return Ok(Some(path));
+    }
+
+    if let Some(session_id) = current_agent_session_id(provider) {
+        if let Some(path) = source.find_session_by_id(&session_id)? {
+            return Ok(Some(path));
+        }
+    }
+
+    source.find_current_session(cwd)
+}
+
+fn current_agent_transcript_path(provider: AgentProvider) -> Option<PathBuf> {
+    let env_name = provider.current_transcript_env()?;
+    std::env::var(env_name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn current_agent_session_id(provider: AgentProvider) -> Option<String> {
+    let env_name = provider.current_session_id_env()?;
+    std::env::var(env_name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn excluded_session_matches(record: &WorkRecord, excluded_sessions: &HashSet<PathBuf>) -> bool {
+    if excluded_sessions.is_empty() || record.kind != WorkRecordKind::ChatTurn {
+        return false;
+    }
+
+    record
+        .session_path
+        .as_deref()
+        .map(Path::new)
+        .map(comparable_path)
+        .is_some_and(|path| excluded_sessions.contains(&path))
+}
+
+fn comparable_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn record_snippet(record: &WorkRecord, field: SearchFieldArg) -> String {
+    let text = match field {
+        SearchFieldArg::Title => record.title.as_str(),
+        SearchFieldArg::Session => record.work_ref.session(),
+        SearchFieldArg::Input | SearchFieldArg::Command => {
+            record.text.input.as_deref().unwrap_or("")
+        }
+        SearchFieldArg::Output => record.text.output.as_deref().unwrap_or(""),
+        SearchFieldArg::Content | SearchFieldArg::All => return first_content_snippet(record),
+    };
+
+    snippet(text)
+}
+
+fn first_content_snippet(record: &WorkRecord) -> String {
+    combined_text(record)
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(snippet)
+        .unwrap_or_default()
+}
+
+fn snippet(text: &str) -> String {
+    const LIMIT: usize = 160;
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut shortened = collapsed.chars().take(LIMIT).collect::<String>();
+    if collapsed.chars().count() > LIMIT {
+        shortened.push('…');
+    }
+    shortened
+}
+
+fn search_json_item(result: SearchResultGroup<'_>) -> SearchJsonItem {
     SearchJsonItem {
         ref_: result.ref_,
-        timestamp: result.record.time.occurred_at.clone(),
+        parent_ref: None,
+        timestamp: result.record.time.primary_at().map(str::to_string),
         dialogue: result.record.title.clone(),
         status: result.record.status.outcome,
         exit_code: result.record.status.exit_code,
         duration_ms: result.record.time.duration_ms,
+        matches: result
+            .matches
+            .into_iter()
+            .map(|matched| SearchJsonMatch {
+                ref_: matched.ref_,
+                line: matched.line,
+                snippet: matched.snippet,
+            })
+            .collect(),
     }
 }
 
@@ -600,11 +849,11 @@ mod tests {
             kind: WorkRecordKind::TerminalCommand,
             session_path: None,
             cwd: None,
-            time: WorkTime {
-                occurred_at: Some("2026-05-24T00:00:00Z".to_string()),
-                ended_at: None,
-                duration_ms: Some(150),
-            },
+            time: WorkTime::from_components(
+                Some("2026-05-24T00:00:00Z".to_string()),
+                None,
+                Some(150),
+            ),
             status: WorkStatus {
                 outcome: WorkOutcome::Failure,
                 exit_code: Some(101),

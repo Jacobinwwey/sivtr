@@ -386,6 +386,8 @@ Filters:
   --last <duration>     Time window, e.g. 30m, 2h, 7d
   --since/--until       Absolute or relative time bounds
   --latest <n>          Return the latest n matching records
+  --exclude-current     Exclude the current agent session from agent searches
+  --other               Alias for --exclude-current
 
 Examples:
   sivtr search terminal --status failure --latest 1 --json
@@ -687,9 +689,13 @@ pub struct SearchArgs {
     #[arg(long, value_name = "N")]
     pub latest: Option<usize>,
 
-    /// Maximum number of results to print
+    /// Maximum number of result groups to print
     #[arg(short = 'l', long, value_name = "N")]
     pub limit: Option<usize>,
+
+    /// Exclude the current agent session from agent searches
+    #[arg(long = "exclude-current", alias = "other")]
+    pub exclude_current: bool,
 
     /// Print machine-readable JSON
     #[arg(long)]
@@ -1166,6 +1172,7 @@ mod tests {
                 assert_eq!(args.until, None);
                 assert_eq!(args.last, None);
                 assert_eq!(args.latest, None);
+                assert!(!args.exclude_current);
             }
             _ => panic!("expected search command"),
         }
@@ -1241,6 +1248,23 @@ mod tests {
 
         match cli.command {
             Some(Commands::Search(args)) => assert_eq!(args.target, "terminal/session_1/3/2"),
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_exclude_current_aliases() {
+        let cli = Cli::try_parse_from(["sivtr", "search", "agent", "--exclude-current"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Search(args)) => assert!(args.exclude_current),
+            _ => panic!("expected search command"),
+        }
+
+        let cli = Cli::try_parse_from(["sivtr", "search", "agent", "--other"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Search(args)) => assert!(args.exclude_current),
             _ => panic!("expected search command"),
         }
     }
