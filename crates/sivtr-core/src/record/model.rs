@@ -190,13 +190,13 @@ impl WorkRecord {
             return None;
         }
 
-        let work_ref = WorkRef::terminal_record("current", index + 1);
-        let ref_id = work_ref.to_string();
         let session_id = session_path
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("current")
             .to_string();
+        let work_ref = WorkRef::terminal_record(session_id.clone(), index + 1);
+        let ref_id = work_ref.to_string();
         let title = if command.is_empty() {
             preview(&output)
         } else {

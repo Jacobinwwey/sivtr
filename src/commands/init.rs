@@ -31,7 +31,7 @@ $Global:_sift_orig_prompt = $function:prompt
 function Global:prompt { try { sift flush *>$null } catch {}; & $Global:_sift_orig_prompt }
 "#;
 const POWERSHELL_HOOK: &str = r#"# >>> sivtr shell integration >>>
-$env:SIVTR_SESSION_LOG = Join-Path $env:APPDATA "sivtr\session_$PID.log"
+$env:SIVTR_TERMINAL_ID = "session_$PID"
 if (-not $Global:_sivtr_prompt_wrapped) {
     $Global:_sivtr_orig_prompt = $function:prompt
     function Global:prompt {
@@ -63,6 +63,16 @@ if (-not $Global:_sivtr_prompt_wrapped) {
                 Remove-Item Env:SIVTR_LAST_EXIT_CODE -ErrorAction SilentlyContinue
             }
             $env:SIVTR_LAST_PROMPT = [string]$rendered
+            try {
+                $root = git rev-parse --show-toplevel 2>$null
+                if ($LASTEXITCODE -eq 0 -and $root) {
+                    $env:SIVTR_SESSION_LOG = sivtr terminal-log $root 2>$null
+                } else {
+                    Remove-Item Env:SIVTR_SESSION_LOG -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Remove-Item Env:SIVTR_SESSION_LOG -ErrorAction SilentlyContinue
+            }
             sivtr flush
             $Global:_sivtr_next_command_cwd = [string](Get-Location)
         } catch {}
@@ -76,13 +86,7 @@ if (-not $Global:_sivtr_prompt_wrapped) {
 const BASH_MARKER_START: &str = "# >>> sivtr shell integration >>>";
 const BASH_MARKER_END: &str = "# <<< sivtr shell integration <<<";
 const BASH_HOOK: &str = r#"# >>> sivtr shell integration >>>
-if [[ -n "${APPDATA:-}" ]]; then
-  export SIVTR_SESSION_LOG="${APPDATA}\\sivtr\\session_$$.log"
-else
-  export SIVTR_SESSION_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/sivtr/session_$$.log"
-fi
-export SIVTR_CAPTURE_FILE="${SIVTR_SESSION_LOG%.log}.capture"
-mkdir -p "${SIVTR_SESSION_LOG%/*}"
+export SIVTR_TERMINAL_ID="session_$$"
 __sivtr_precmd() {
   local exit_status=$?
   local hist_entry
@@ -98,6 +102,11 @@ __sivtr_precmd() {
   fi
   export SIVTR_LAST_EXIT_CODE="$exit_status"
   export SIVTR_COMMAND_ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    export SIVTR_SESSION_LOG="$(sivtr terminal-log "$root" 2>/dev/null)"
+  else
+    unset SIVTR_SESSION_LOG
+  fi
   unset SIVTR_COMMAND_DURATION_MS
   export SIVTR_LAST_PROMPT="${PS1@P}"
   sivtr flush >/dev/null 2>&1 || true
@@ -122,13 +131,7 @@ fi
 const ZSH_MARKER_START: &str = "# >>> sivtr shell integration >>>";
 const ZSH_MARKER_END: &str = "# <<< sivtr shell integration <<<";
 const ZSH_HOOK: &str = r#"# >>> sivtr shell integration >>>
-if [[ -n "${APPDATA:-}" ]]; then
-  export SIVTR_SESSION_LOG="${APPDATA}\\sivtr\\session_$$.log"
-else
-  export SIVTR_SESSION_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/sivtr/session_$$.log"
-fi
-export SIVTR_CAPTURE_FILE="${SIVTR_SESSION_LOG%.log}.capture"
-mkdir -p "${SIVTR_SESSION_LOG%/*}"
+export SIVTR_TERMINAL_ID="session_$$"
 _sivtr_precmd() {
   local exit_status=$?
   export SIVTR_LAST_COMMAND="$(fc -ln -1)"
@@ -140,6 +143,11 @@ _sivtr_precmd() {
   fi
   export SIVTR_LAST_EXIT_CODE="$exit_status"
   export SIVTR_COMMAND_ENDED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    export SIVTR_SESSION_LOG="$(sivtr terminal-log "$root" 2>/dev/null)"
+  else
+    unset SIVTR_SESSION_LOG
+  fi
   unset SIVTR_COMMAND_DURATION_MS
   export SIVTR_LAST_PROMPT="$(print -P "$PROMPT")"
   sivtr flush >/dev/null 2>&1 || true
@@ -155,7 +163,7 @@ fi
 const NUSHELL_MARKER_START: &str = "# >>> sivtr shell integration >>>";
 const NUSHELL_MARKER_END: &str = "# <<< sivtr shell integration <<<";
 const NUSHELL_HOOK: &str = r#"# >>> sivtr shell integration >>>
-$env.SIVTR_SESSION_LOG = (($env.APPDATA? | default $nu.default-config-dir) | path join 'sivtr' $"session_($nu.pid).log")
+$env.SIVTR_TERMINAL_ID = $"session_($nu.pid)"
 if (($env.SIVTR_PROMPT_WRAPPED? | default false) != true) {
     def _sivtr_precmd [] {
         let last = (history | last 1 | get 0?)
@@ -166,6 +174,12 @@ if (($env.SIVTR_PROMPT_WRAPPED? | default false) != true) {
             $env.SIVTR_COMMAND_DURATION_MS = (($last.duration? | default "") | into string)
         }
         $env.SIVTR_COMMAND_ENDED_AT = (date now | into string)
+        let root = (do -i { ^git rev-parse --show-toplevel } | complete)
+        if $root.exit_code == 0 and (($root.stdout | str trim) != "") {
+            $env.SIVTR_SESSION_LOG = (^sivtr terminal-log ($root.stdout | str trim))
+        } else {
+            hide-env SIVTR_SESSION_LOG
+        }
         $env.SIVTR_LAST_EXIT_CODE = ($env.LAST_EXIT_CODE? | default "" | into string)
         $env.SIVTR_LAST_PROMPT = (do $env.PROMPT_COMMAND)
         try { ^sivtr flush } catch {}
@@ -793,7 +807,7 @@ mod tests {
 
     #[test]
     fn bash_hook_keeps_capture_path_without_tty_redirection() {
-        assert!(BASH_HOOK.contains("export SIVTR_CAPTURE_FILE="));
+        assert!(BASH_HOOK.contains("export SIVTR_TERMINAL_ID="));
         assert!(!BASH_HOOK.contains("trap '__sivtr_preexec' DEBUG"));
         assert!(!BASH_HOOK.contains("exec > >(tee \"$SIVTR_CAPTURE_FILE\""));
     }
@@ -809,7 +823,7 @@ mod tests {
 
     #[test]
     fn zsh_hook_keeps_capture_path_without_tty_redirection() {
-        assert!(ZSH_HOOK.contains("export SIVTR_CAPTURE_FILE="));
+        assert!(ZSH_HOOK.contains("export SIVTR_TERMINAL_ID="));
         assert!(!ZSH_HOOK.contains("preexec_functions=(_sivtr_preexec"));
         assert!(!ZSH_HOOK.contains("exec > >(tee \"$SIVTR_CAPTURE_FILE\""));
     }

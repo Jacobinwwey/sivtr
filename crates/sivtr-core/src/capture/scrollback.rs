@@ -1,126 +1,31 @@
 use anyhow::Result;
 use std::env;
-use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::path::PathBuf;
 
-use crate::session;
-
-static CLEANUP_ONCE: Once = Once::new();
+use crate::{session, workspace};
 
 /// Get the session log path used by the shell hook.
 pub fn session_log_path() -> std::path::PathBuf {
     if let Ok(path) = env::var("SIVTR_SESSION_LOG") {
         let path = PathBuf::from(path);
-        cleanup_stale_sessions_once(&path);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    if let Ok(Some(path)) = workspace::current_terminal_log_path() {
         return path;
     }
 
-    if let Ok(path) = env::var("SIFT_SESSION_LOG") {
-        let path = PathBuf::from(path);
-        cleanup_stale_sessions_once(&path);
-        return path;
-    }
-
-    let base_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let current = base_dir.join("sivtr").join("session.log");
-    if current.exists() {
-        return current;
-    }
-
-    let legacy = base_dir.join("sift").join("session.log");
-    if legacy.exists() {
-        return legacy;
-    }
-
-    current
+    workspace::legacy_session_dir().join("session.log")
 }
 
-fn cleanup_stale_sessions_once(current_session_path: &Path) {
-    let current_session_path = current_session_path.to_path_buf();
-    CLEANUP_ONCE.call_once(|| {
-        let _ = cleanup_stale_sessions(&current_session_path);
-    });
-}
-
-fn cleanup_stale_sessions(current_session_path: &Path) -> Result<()> {
-    let Some(parent) = current_session_path.parent() else {
-        return Ok(());
-    };
-    if !parent.exists() {
-        return Ok(());
+/// Get the current workspace terminal session log path.
+pub fn workspace_session_log_path() -> Result<Option<std::path::PathBuf>> {
+    if let Ok(path) = env::var("SIVTR_SESSION_LOG") {
+        return Ok(Some(PathBuf::from(path)));
     }
-
-    let current_pid = session_pid_from_path(current_session_path);
-
-    for entry in std::fs::read_dir(parent)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let Some(pid) = session_pid_from_path(&path) else {
-            continue;
-        };
-
-        if Some(pid) == current_pid || process_is_alive(pid) {
-            continue;
-        }
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    Ok(())
-}
-
-fn session_pid_from_path(path: &Path) -> Option<u32> {
-    let name = path.file_name()?.to_str()?;
-    let suffix = if let Some(pid) = name
-        .strip_prefix("session_")
-        .and_then(|rest| rest.strip_suffix(".log"))
-    {
-        pid
-    } else if let Some(pid) = name
-        .strip_prefix("session_")
-        .and_then(|rest| rest.strip_suffix(".state"))
-    {
-        pid
-    } else if let Some(pid) = name
-        .strip_prefix("session_")
-        .and_then(|rest| rest.strip_suffix(".capture"))
-    {
-        pid
-    } else {
-        return None;
-    };
-
-    suffix.parse::<u32>().ok()
-}
-
-#[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
-    use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
-    use winapi::um::processthreadsapi::OpenProcess;
-    use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
-
-    unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-            return false;
-        }
-        let _ = CloseHandle(handle);
-        true
-    }
-}
-
-#[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
-    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if result == 0 {
-        return true;
-    }
-
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    workspace::current_terminal_log_path()
 }
 
 /// Get the flush state file path (derived from session log path).
@@ -356,25 +261,4 @@ fn win_attr_to_ansi(attr: u16) -> String {
     }
 
     format!("\x1b[{}m", codes.join(";"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::session_pid_from_path;
-    use std::path::Path;
-
-    #[test]
-    fn extracts_pid_from_session_artifacts() {
-        assert_eq!(session_pid_from_path(Path::new("session_42.log")), Some(42));
-        assert_eq!(
-            session_pid_from_path(Path::new("session_42.state")),
-            Some(42)
-        );
-        assert_eq!(
-            session_pid_from_path(Path::new("session_42.capture")),
-            Some(42)
-        );
-        assert_eq!(session_pid_from_path(Path::new("session.log")), None);
-        assert_eq!(session_pid_from_path(Path::new("history.db")), None);
-    }
 }

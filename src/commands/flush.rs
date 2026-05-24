@@ -17,6 +17,11 @@ pub fn execute() -> Result<()> {
 }
 
 fn do_flush() -> Result<()> {
+    let Some(session_log_path) = scrollback::workspace_session_log_path()? else {
+        return Ok(());
+    };
+    let flush_state_path = session_log_path.with_extension("state");
+
     #[cfg(windows)]
     {
         let snapshot = scrollback::capture_console_buffer()?;
@@ -35,8 +40,8 @@ fn do_flush() -> Result<()> {
             snapshot.width,
         );
         append_entry_from_output(
-            &scrollback::session_log_path(),
-            &scrollback::flush_state_path(),
+            &session_log_path,
+            &flush_state_path,
             prompt,
             command,
             command_id,
@@ -47,7 +52,7 @@ fn do_flush() -> Result<()> {
 
     #[cfg(not(windows))]
     {
-        let capture_path = scrollback::capture_file_path();
+        let capture_path = session_log_path.with_extension("capture");
         if !capture_path.exists() {
             return Ok(());
         }
@@ -65,8 +70,8 @@ fn do_flush() -> Result<()> {
         let output = trim_trailing_prompt_artifact(output, &prompt);
 
         append_entry_from_output(
-            &scrollback::session_log_path(),
-            &scrollback::flush_state_path(),
+            &session_log_path,
+            &flush_state_path,
             prompt,
             command,
             command_id,

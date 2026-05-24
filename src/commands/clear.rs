@@ -1,8 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use sivtr_core::capture::scrollback;
+use sivtr_core::workspace;
 
 /// Clear the current session's log and state files.
 pub fn execute(clear_all: bool) -> Result<()> {
@@ -45,26 +46,39 @@ fn clear_all_sessions() -> Result<usize> {
     let mut removed = 0usize;
     let mut seen = Vec::<PathBuf>::new();
 
+    for path in legacy_session_artifacts() {
+        if path.is_file() && !seen.iter().any(|seen_path| seen_path == &path) {
+            fs::remove_file(&path)?;
+            removed += 1;
+            seen.push(path);
+        }
+    }
+
+    let workspaces_dir = workspace::data_dir().join("workspaces");
+    if workspaces_dir.exists() {
+        fs::remove_dir_all(&workspaces_dir).context("Failed to clear workspace session files")?;
+        removed += 1;
+    }
+
+    Ok(removed)
+}
+
+fn legacy_session_artifacts() -> Vec<PathBuf> {
+    let mut artifacts = Vec::new();
     for dir in candidate_session_dirs() {
         if !dir.exists() {
             continue;
         }
-
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !is_session_artifact(&path) || seen.iter().any(|seen_path| seen_path == &path) {
-                continue;
-            }
-            if path.is_file() {
-                fs::remove_file(&path)?;
-                removed += 1;
-                seen.push(path);
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if is_session_artifact(&path) {
+                    artifacts.push(path);
+                }
             }
         }
     }
-
-    Ok(removed)
+    artifacts
 }
 
 fn candidate_session_dirs() -> Vec<PathBuf> {

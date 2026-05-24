@@ -85,9 +85,12 @@ struct IndexedCommandBlock {
 }
 
 impl IndexedCommandBlock {
-    fn from_session_entry(entry: &SessionEntry, index: usize) -> Option<Self> {
-        WorkRecord::terminal(entry, std::path::Path::new("current"), index)
-            .map(|record| Self { record })
+    fn from_session_entry(
+        entry: &SessionEntry,
+        path: &std::path::Path,
+        index: usize,
+    ) -> Option<Self> {
+        WorkRecord::terminal(entry, path, index).map(|record| Self { record })
     }
 }
 
@@ -122,7 +125,9 @@ pub fn execute(request: CopyRequest<'_>) -> Result<()> {
     let blocks: Vec<IndexedCommandBlock> = entries
         .iter()
         .enumerate()
-        .filter_map(|(index, entry)| IndexedCommandBlock::from_session_entry(entry, index))
+        .filter_map(|(index, entry)| {
+            IndexedCommandBlock::from_session_entry(entry, &log_path, index)
+        })
         .collect();
 
     let total = blocks.len();
@@ -402,7 +407,7 @@ fn pick_agent_sessions_content_on_terminal(
     }
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
 
-    let sessions = workspace_sessions_from_agent_choices(sessions)?;
+    let sessions = workspace_sessions_from_agent_choices(sessions, None)?;
     if sessions.is_empty() {
         anyhow::bail!("No terminal or AI sessions found");
     }
@@ -417,7 +422,7 @@ fn pick_current_agent_sessions_content_on_terminal(
     selection_mode: AgentSelection,
 ) -> Result<WorkspacePickedContent> {
     let sessions = build_current_lazy_agent_session_choices(sources, cwd, selection_mode)?;
-    let sessions = workspace_sessions_from_agent_choices(sessions)?;
+    let sessions = workspace_sessions_from_agent_choices(sessions, Some(cwd))?;
     if sessions.is_empty() {
         anyhow::bail!("No current terminal or AI sessions found");
     }
@@ -604,10 +609,9 @@ fn build_agent_session_choice(
 
 fn workspace_sessions_from_agent_choices(
     mut choices: Vec<WorkspaceSession>,
+    cwd: Option<&std::path::Path>,
 ) -> Result<Vec<WorkspaceSession>> {
-    if let Some(session) = build_terminal_context_session()? {
-        choices.push(session);
-    }
+    choices.extend(build_terminal_context_sessions(cwd)?);
     choices.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(choices)
 }
@@ -623,12 +627,17 @@ fn execute_terminal_workspace_pick(
     regex: Option<&str>,
     lines: Option<&str>,
 ) -> Result<()> {
+    let session_title = scrollback::workspace_session_log_path()
+        .ok()
+        .flatten()
+        .unwrap_or_else(scrollback::session_log_path);
     let Some(session) = build_terminal_workspace_session(
         blocks,
         mode,
         include_prompt,
         prompt_override,
         SystemTime::now(),
+        &sivtr_core::workspace::terminal_session_id_from_path(&session_title),
     ) else {
         eprintln!("sivtr: selected commands are empty");
         eprintln!("  hint: try `sivtr copy --out` or choose a different block");
@@ -653,32 +662,47 @@ fn execute_terminal_workspace_pick(
     )
 }
 
-fn build_terminal_context_session() -> Result<Option<WorkspaceSession>> {
-    let log_path = scrollback::session_log_path();
-    if !log_path.exists() {
-        return Ok(None);
-    }
+fn build_terminal_context_sessions(cwd: Option<&std::path::Path>) -> Result<Vec<WorkspaceSession>> {
+    let paths = if let Some(cwd) = cwd {
+        sivtr_core::workspace::terminal_log_paths_for_workspace(cwd)?
+    } else {
+        let path = scrollback::session_log_path();
+        if path.exists() {
+            vec![path]
+        } else {
+            Vec::new()
+        }
+    };
 
-    let entries = session::load_entries(&log_path).context("Failed to read session log")?;
-    if entries.is_empty() {
-        return Ok(None);
-    }
+    let mut sessions = Vec::new();
+    for log_path in paths {
+        let entries = session::load_entries(&log_path).context("Failed to read session log")?;
+        if entries.is_empty() {
+            continue;
+        }
 
-    let blocks = entries
-        .iter()
-        .enumerate()
-        .filter_map(|(index, entry)| IndexedCommandBlock::from_session_entry(entry, index))
-        .collect::<Vec<_>>();
-    let modified = std::fs::metadata(&log_path)
-        .and_then(|metadata| metadata.modified())
-        .unwrap_or_else(|_| SystemTime::now());
-    Ok(build_terminal_workspace_session(
-        &blocks,
-        CopyMode::Both,
-        true,
-        None,
-        modified,
-    ))
+        let blocks = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                IndexedCommandBlock::from_session_entry(entry, &log_path, index)
+            })
+            .collect::<Vec<_>>();
+        let modified = std::fs::metadata(&log_path)
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or_else(|_| SystemTime::now());
+        if let Some(session) = build_terminal_workspace_session(
+            &blocks,
+            CopyMode::Both,
+            true,
+            None,
+            modified,
+            &sivtr_core::workspace::terminal_session_id_from_path(&log_path),
+        ) {
+            sessions.push(session);
+        }
+    }
+    Ok(sessions)
 }
 
 fn build_terminal_workspace_session(
@@ -687,6 +711,7 @@ fn build_terminal_workspace_session(
     include_prompt: bool,
     prompt_override: Option<&str>,
     modified: SystemTime,
+    session_title: &str,
 ) -> Option<WorkspaceSession> {
     let records = blocks
         .iter()
@@ -701,7 +726,8 @@ fn build_terminal_workspace_session(
     }
 
     let block_count = records.len();
-    let title = format!("current shell  [{block_count} blocks]");
+    let title = format!("{session_title}  [{block_count} blocks]");
+
     Some(WorkspaceSession {
         source: WorkspaceSource::Terminal,
         modified,

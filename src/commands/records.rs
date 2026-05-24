@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use sivtr_core::ai::AgentProvider;
-use sivtr_core::capture::scrollback;
 use sivtr_core::record::{WorkRecord, WorkRecordIndex};
-use sivtr_core::session;
+use sivtr_core::{session, workspace};
 use std::path::Path;
 
 pub(crate) fn current_work_record_index(
@@ -19,24 +18,24 @@ fn current_work_records(
     recent_sessions: Option<usize>,
 ) -> Result<Vec<WorkRecord>> {
     let mut records = Vec::new();
-    records.extend(terminal_records()?);
+    records.extend(terminal_records(cwd)?);
     records.extend(agent_records(providers, cwd, recent_sessions)?);
     records.sort_by(|a, b| b.time.occurred_at.cmp(&a.time.occurred_at));
     Ok(records)
 }
 
-fn terminal_records() -> Result<Vec<WorkRecord>> {
-    let path = scrollback::session_log_path();
-    if !path.exists() {
-        return Ok(Vec::new());
+fn terminal_records(cwd: &Path) -> Result<Vec<WorkRecord>> {
+    let mut records = Vec::new();
+    for path in workspace::terminal_log_paths_for_workspace(cwd)? {
+        let entries = session::load_entries(&path).context("Failed to read session log")?;
+        records.extend(
+            entries
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, entry)| WorkRecord::terminal(entry, &path, idx)),
+        );
     }
-
-    let entries = session::load_entries(&path).context("Failed to read session log")?;
-    Ok(entries
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, entry)| WorkRecord::terminal(entry, &path, idx))
-        .collect())
+    Ok(records)
 }
 
 fn agent_records(
