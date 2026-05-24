@@ -116,6 +116,8 @@ sivtr init linux-shortcut
 - `~/.local/bin/sivtr-pick-codex`
 - `~/.local/share/applications/sivtr-pick-codex.desktop`
 
+历史文件名会为兼容性保留，但生成出来的脚本现在会使用生成它的那一个 `sivtr` 二进制，直接打开 provider-neutral 的 AI session picker。
+
 把桌面快捷键绑定到生成的脚本，或直接从终端运行它。
 
 ## macOS 启动器
@@ -131,12 +133,10 @@ sivtr init macos-shortcut
 - `~/.local/bin/sivtr-pick-codex`
 - `~/Library/LaunchAgents/dev.sivtr.pick-codex.plist`
 
+历史文件名会为兼容性保留，但生成出来的脚本现在会使用生成它的那一个 `sivtr` 二进制，直接打开 provider-neutral 的 AI session picker。
+
 可以直接运行脚本，或加载 LaunchAgent：
 
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.sivtr.pick-codex.plist
 ```
-
-## 当前限制
-
-部分生成的 shortcut helper 内部仍使用历史上的 Codex-oriented picker 命令。Provider-neutral CLI 和 Windows hotkey 路径已经走在前面。把它当成兼容细节，而不是产品边界；Agent session 文档会在 CLI 已支持的地方使用 provider-neutral 命令。
