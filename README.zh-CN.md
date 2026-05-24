@@ -287,6 +287,8 @@ sivtr init macos-shortcut
 - `~/.local/bin/sivtr-pick-codex`
 - `~/Library/LaunchAgents/dev.sivtr.pick-codex.plist`
 
+历史文件名会为兼容性保留，但生成出来的脚本现在会使用生成它的那一个 `sivtr` 二进制，直接打开 provider-neutral 的 AI session picker。
+
 你可以：
 
 - 直接运行 `~/.local/bin/sivtr-pick-codex`；

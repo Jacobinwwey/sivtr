@@ -370,11 +370,12 @@ fn install_linux_shortcut() -> Result<()> {
     fs::create_dir_all(&applications_dir)?;
 
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    let sivtr_bin = std::env::current_exe().context("Failed to resolve current executable")?;
     let terminal = detect_linux_terminal();
     let script_path = bin_dir.join("sivtr-pick-codex");
     let desktop_path = applications_dir.join("sivtr-pick-codex.desktop");
 
-    write_linux_shortcut_script(&script_path, &cwd, terminal.as_deref())?;
+    write_linux_shortcut_script(&script_path, &cwd, &sivtr_bin, terminal.as_deref())?;
     write_linux_shortcut_desktop_entry(&desktop_path, &script_path)?;
 
     eprintln!("sivtr: installed Linux shortcut launcher");
@@ -411,10 +412,11 @@ fn install_macos_shortcut() -> Result<()> {
     fs::create_dir_all(&launch_agents_dir)?;
 
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    let sivtr_bin = std::env::current_exe().context("Failed to resolve current executable")?;
     let script_path = bin_dir.join("sivtr-pick-codex");
     let plist_path = launch_agents_dir.join(format!("{MACOS_SHORTCUT_LABEL}.plist"));
 
-    write_macos_shortcut_script(&script_path, &cwd)?;
+    write_macos_shortcut_script(&script_path, &cwd, &sivtr_bin)?;
     write_macos_shortcut_plist(&plist_path, &script_path)?;
 
     eprintln!("sivtr: installed macOS shortcut launcher");
@@ -626,8 +628,13 @@ fn command_exists(name: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn write_linux_shortcut_script(path: &Path, cwd: &Path, terminal: Option<&str>) -> Result<()> {
-    let script = render_linux_shortcut_script(cwd, terminal);
+fn write_linux_shortcut_script(
+    path: &Path,
+    cwd: &Path,
+    sivtr_bin: &Path,
+    terminal: Option<&str>,
+) -> Result<()> {
+    let script = render_linux_shortcut_script(cwd, sivtr_bin, terminal);
     fs::write(path, script)?;
     #[cfg(unix)]
     {
@@ -639,8 +646,9 @@ fn write_linux_shortcut_script(path: &Path, cwd: &Path, terminal: Option<&str>) 
 }
 
 #[cfg(unix)]
-fn render_linux_shortcut_script(cwd: &Path, terminal: Option<&str>) -> String {
+fn render_linux_shortcut_script(cwd: &Path, sivtr_bin: &Path, terminal: Option<&str>) -> String {
     let cwd = shell_single_quote(&cwd.to_string_lossy());
+    let sivtr_bin = shell_single_quote(&sivtr_bin.to_string_lossy());
     let launcher = terminal
         .map(build_terminal_launch_command)
         .unwrap_or_else(|| {
@@ -648,12 +656,15 @@ fn render_linux_shortcut_script(cwd: &Path, terminal: Option<&str>) -> String {
                 .to_string()
         });
 
-    format!("#!/usr/bin/env bash\nset -euo pipefail\nexport PROJECT_CWD='{cwd}'\n{launcher}\n")
+    format!(
+        "#!/usr/bin/env bash\nset -euo pipefail\nexport PROJECT_CWD='{cwd}'\nexport SIVTR_BIN='{sivtr_bin}'\n{launcher}\n"
+    )
 }
 
 #[cfg(unix)]
 fn build_terminal_launch_command(terminal: &str) -> String {
-    let picker = "cd \"$PROJECT_CWD\"; exec sivtr copy codex --pick";
+    let picker =
+        "cd \"$PROJECT_CWD\"; exec \"$SIVTR_BIN\" hotkey-pick-agent --cwd \"$PROJECT_CWD\" --provider all";
     match terminal {
         "gnome-terminal" => format!("exec gnome-terminal -- bash -lc '{picker}'"),
         "konsole" => format!("exec konsole --noclose -e bash -lc '{picker}'"),
@@ -667,8 +678,8 @@ fn build_terminal_launch_command(terminal: &str) -> String {
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
-fn write_macos_shortcut_script(path: &Path, cwd: &Path) -> Result<()> {
-    let script = render_macos_shortcut_script(cwd);
+fn write_macos_shortcut_script(path: &Path, cwd: &Path, sivtr_bin: &Path) -> Result<()> {
+    let script = render_macos_shortcut_script(cwd, sivtr_bin);
     fs::write(path, script)?;
     #[cfg(unix)]
     {
@@ -680,10 +691,11 @@ fn write_macos_shortcut_script(path: &Path, cwd: &Path) -> Result<()> {
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
-fn render_macos_shortcut_script(cwd: &Path) -> String {
+fn render_macos_shortcut_script(cwd: &Path, sivtr_bin: &Path) -> String {
     let cwd = shell_single_quote(&cwd.to_string_lossy());
+    let sivtr_bin = shell_single_quote(&sivtr_bin.to_string_lossy());
     format!(
-        "#!/usr/bin/env bash\nset -euo pipefail\nexport PROJECT_CWD='{cwd}'\ncd \"$PROJECT_CWD\"\nexec sivtr copy codex --pick\n"
+        "#!/usr/bin/env bash\nset -euo pipefail\nexport PROJECT_CWD='{cwd}'\nexport SIVTR_BIN='{sivtr_bin}'\ncd \"$PROJECT_CWD\"\nexec \"$SIVTR_BIN\" hotkey-pick-agent --cwd \"$PROJECT_CWD\" --provider all\n"
     )
 }
 
@@ -862,7 +874,9 @@ mod tests {
         let command = build_terminal_launch_command("gnome-terminal");
 
         assert!(command.contains("gnome-terminal"));
-        assert!(command.contains("cd \"$PROJECT_CWD\"; exec sivtr copy codex --pick"));
+        assert!(command.contains(
+            "cd \"$PROJECT_CWD\"; exec \"$SIVTR_BIN\" hotkey-pick-agent --cwd \"$PROJECT_CWD\" --provider all"
+        ));
     }
 
     #[cfg(unix)]
@@ -874,10 +888,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn linux_shortcut_script_exports_project_cwd() {
-        let script = render_linux_shortcut_script(Path::new("/tmp/project"), Some("xterm"));
+        let script = render_linux_shortcut_script(
+            Path::new("/tmp/project"),
+            Path::new("/tmp/bin/sivtr"),
+            Some("xterm"),
+        );
 
         assert!(script.contains("export PROJECT_CWD='/tmp/project'"));
-        assert!(script.contains("cd \"$PROJECT_CWD\"; exec sivtr copy codex --pick"));
+        assert!(script.contains("export SIVTR_BIN='/tmp/bin/sivtr'"));
+        assert!(script.contains(
+            "cd \"$PROJECT_CWD\"; exec \"$SIVTR_BIN\" hotkey-pick-agent --cwd \"$PROJECT_CWD\" --provider all"
+        ));
     }
 
     #[test]
@@ -898,10 +919,14 @@ mod tests {
 
     #[test]
     fn macos_shortcut_script_runs_picker_in_project_cwd() {
-        let script = render_macos_shortcut_script(Path::new("/tmp/project"));
+        let script =
+            render_macos_shortcut_script(Path::new("/tmp/project"), Path::new("/tmp/bin/sivtr"));
 
         assert!(script.contains("export PROJECT_CWD='/tmp/project'"));
-        assert!(script.contains("exec sivtr copy codex --pick"));
+        assert!(script.contains("export SIVTR_BIN='/tmp/bin/sivtr'"));
+        assert!(script.contains(
+            "exec \"$SIVTR_BIN\" hotkey-pick-agent --cwd \"$PROJECT_CWD\" --provider all"
+        ));
     }
 
     #[test]

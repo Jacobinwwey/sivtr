@@ -299,6 +299,10 @@ This writes:
 - `~/.local/bin/sivtr-pick-codex`
 - `~/Library/LaunchAgents/dev.sivtr.pick-codex.plist`
 
+The historical filename stays the same for compatibility, but the generated
+script now opens the provider-neutral AI session picker with the exact `sivtr`
+binary that created it.
+
 You can:
 
 - run `~/.local/bin/sivtr-pick-codex` directly;
