@@ -295,7 +295,7 @@ impl WorkRecord {
                 .filter(|message| message.role == "assistant")
                 .map(|message| message.content.as_str()),
         );
-        if assistant.trim().is_empty() {
+        if assistant.trim().is_empty() && !last_user_is_followed_only_by_tools(blocks) {
             return None;
         }
 
@@ -726,10 +726,30 @@ pub fn chat_turn_ranges(blocks: &[AgentBlock]) -> Vec<(usize, usize)> {
     if let Some(start) = start {
         if has_assistant {
             ranges.push((start, blocks.len()));
+        } else if let Some(previous_user_only_turn) =
+            user_only_turn_before_trailing_tools(blocks, start)
+        {
+            ranges.push(previous_user_only_turn);
         }
     }
 
     ranges
+}
+
+fn user_only_turn_before_trailing_tools(
+    blocks: &[AgentBlock],
+    start: usize,
+) -> Option<(usize, usize)> {
+    blocks
+        .get(start + 1..)?
+        .iter()
+        .all(|block| {
+            matches!(
+                block.kind,
+                AgentBlockKind::ToolCall | AgentBlockKind::ToolOutput
+            )
+        })
+        .then_some((start, blocks.len()))
 }
 
 pub fn is_real_user_block(block: &AgentBlock) -> bool {
@@ -782,6 +802,22 @@ fn first_timestamp(blocks: &[AgentBlock]) -> Option<String> {
     blocks.iter().find_map(|block| block.timestamp.clone())
 }
 
+fn last_user_is_followed_only_by_tools(blocks: &[AgentBlock]) -> bool {
+    let Some(user_idx) = blocks
+        .iter()
+        .rposition(|block| block.kind == AgentBlockKind::User)
+    else {
+        return false;
+    };
+
+    blocks[user_idx + 1..].iter().all(|block| {
+        matches!(
+            block.kind,
+            AgentBlockKind::ToolCall | AgentBlockKind::ToolOutput
+        )
+    })
+}
+
 fn preview(text: &str) -> String {
     text.lines()
         .map(str::trim)
@@ -832,6 +868,53 @@ mod tests {
         assert_eq!(record.status.exit_code, Some(101));
         assert_eq!(record.text.input.as_deref(), Some("cargo test"));
         assert_eq!(record.text.output.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn chat_turn_records_keep_interrupted_user_tool_turn() {
+        let session = AgentSession {
+            path: PathBuf::from("pi-session.jsonl"),
+            id: Some("abcdef123456".to_string()),
+            cwd: Some("D:\\sivtr".to_string()),
+            title: None,
+            blocks: vec![
+                AgentBlock {
+                    kind: AgentBlockKind::User,
+                    timestamp: Some("2026-05-23T12:01:00Z".to_string()),
+                    label: None,
+                    text: "fix latest terminal error".to_string(),
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolCall,
+                    timestamp: Some("2026-05-23T12:02:00Z".to_string()),
+                    label: Some("bash".to_string()),
+                    text: "{\"command\":\"cargo test\"}".to_string(),
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::ToolOutput,
+                    timestamp: Some("2026-05-23T12:03:00Z".to_string()),
+                    label: Some("bash".to_string()),
+                    text: "failed".to_string(),
+                },
+            ],
+        };
+
+        let records = WorkRecord::chat_turns(AgentProvider::Pi, &session);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].text.input.as_deref(),
+            Some("fix latest terminal error")
+        );
+        assert_eq!(records[0].text.output, None);
+        assert_eq!(
+            records[0].text.combined,
+            "## User\nfix latest terminal error"
+        );
+        assert_eq!(
+            records[0].time.occurred_at.as_deref(),
+            Some("2026-05-23T12:01:00Z")
+        );
     }
 
     #[test]
