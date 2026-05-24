@@ -1,10 +1,10 @@
 use super::refs::WorkRef;
 use crate::ai::{
-    format_blocks, select_blocks, AgentBlock, AgentBlockKind, AgentProvider, AgentSelection,
-    AgentSession,
+    format_blocks_with_text, select_blocks, AgentBlock, AgentBlockKind, AgentProvider,
+    AgentSelection, AgentSession,
 };
 use crate::session::SessionEntry;
-use crate::time::{derive_ended_at, derive_started_at, duration_between_ms};
+use crate::time::{derive_ended_at, derive_started_at, duration_between_ms, normalize_timestamp};
 use serde::Serialize;
 use std::path::Path;
 
@@ -258,8 +258,11 @@ impl WorkRecord {
             .iter()
             .map(|block| ChatMessage {
                 role: block_role(block.kind).to_string(),
-                content: block.text.trim().to_string(),
-                timestamp: block.timestamp.clone(),
+                content: compact_skill_blocks(block.text.trim()),
+                timestamp: block
+                    .timestamp
+                    .as_deref()
+                    .and_then(normalize_timestamp),
             })
             .filter(|message| !message.content.is_empty())
             .collect::<Vec<_>>();
@@ -286,12 +289,12 @@ impl WorkRecord {
         let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
         let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
         let title = if user.trim().is_empty() {
-            preview(&assistant)
+            title_preview(&assistant)
         } else {
-            preview(&user)
+            title_preview(&user)
         };
-        let started_at = first_timestamp(blocks);
-        let ended_at = last_timestamp(blocks);
+        let started_at = first_timestamp(blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
+        let ended_at = last_timestamp(blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
 
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
@@ -558,10 +561,14 @@ fn selected_block_record(
     index: usize,
     block: AgentBlock,
 ) -> WorkRecord {
-    let text = block.text.trim().to_string();
-    let title = preview(&text);
+    let text = compact_skill_blocks(block.text.trim());
+    let title = title_preview(&text);
     let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
     let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
+    let block_timestamp = block
+        .timestamp
+        .as_deref()
+        .and_then(normalize_timestamp);
     let (input, output) = match kind {
         AgentBlockKind::User => (Some(text.clone()), None),
         AgentBlockKind::Assistant | AgentBlockKind::ToolOutput => (None, Some(text.clone())),
@@ -574,7 +581,7 @@ fn selected_block_record(
         kind: WorkRecordKind::ChatTurn,
         session_path: Some(session.path.display().to_string()),
         cwd: non_empty(session.cwd.clone()),
-        time: WorkTime::from_components(block.timestamp.clone(), None, None),
+        time: WorkTime::from_components(block_timestamp.clone(), None, None),
         status: WorkStatus {
             outcome: WorkOutcome::Unknown,
             exit_code: None,
@@ -588,12 +595,12 @@ fn selected_block_record(
             },
             assistant: match kind {
                 AgentBlockKind::User => String::new(),
-                _ => text,
+                _ => text.clone(),
             },
             messages: vec![ChatMessage {
                 role: block_role(block.kind).to_string(),
-                content: block.text.trim().to_string(),
-                timestamp: block.timestamp,
+                content: text.clone(),
+                timestamp: block_timestamp,
             }],
         },
     }
@@ -605,15 +612,15 @@ fn selected_group_record(
     selection: AgentSelection,
 ) -> Vec<WorkRecord> {
     let blocks = select_blocks(session, selection);
-    let combined = format_blocks(&blocks);
+    let combined = format_blocks_with_compacted_skills(&blocks);
     if combined.trim().is_empty() {
         return Vec::new();
     }
 
     let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
     let work_ref = WorkRef::agent_record(provider, session_ref.clone(), 1);
-    let started_at = first_timestamp(&blocks);
-    let ended_at = last_timestamp(&blocks);
+    let started_at = first_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
+    let ended_at = last_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
     vec![WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref,
@@ -625,7 +632,7 @@ fn selected_group_record(
             outcome: WorkOutcome::Unknown,
             exit_code: None,
         },
-        title: preview(&combined),
+        title: title_preview(&combined),
         text: WorkText {
             input: None,
             output: Some(combined.clone()),
@@ -637,8 +644,11 @@ fn selected_group_record(
                 .into_iter()
                 .map(|block| ChatMessage {
                     role: block_role(block.kind).to_string(),
-                    content: block.text.trim().to_string(),
-                    timestamp: block.timestamp,
+                    content: compact_skill_blocks(block.text.trim()),
+                    timestamp: block
+                        .timestamp
+                        .as_deref()
+                        .and_then(normalize_timestamp),
                 })
                 .filter(|message| !message.content.is_empty())
                 .collect(),
@@ -767,14 +777,73 @@ fn last_user_is_followed_only_by_tools(blocks: &[AgentBlock]) -> bool {
     })
 }
 
+fn format_blocks_with_compacted_skills(blocks: &[AgentBlock]) -> String {
+    format_blocks_with_text(blocks, |block| compact_skill_blocks(block.text.trim()))
+}
+
+fn compact_skill_blocks(text: &str) -> String {
+    let mut output = String::new();
+    let mut rest = text;
+
+    while let Some(start) = rest.find("<skill ") {
+        output.push_str(&rest[..start]);
+        let candidate = &rest[start..];
+        let Some(open_end) = candidate.find('>') else {
+            output.push_str(candidate);
+            return trim_preserving_inner_whitespace(&output);
+        };
+        let opening = &candidate[..=open_end];
+        let Some(name) = skill_attribute(opening, "name") else {
+            output.push_str(&candidate[..=open_end]);
+            rest = &candidate[open_end + 1..];
+            continue;
+        };
+        let after_open = &candidate[open_end + 1..];
+        let Some(close_start) = after_open.find("</skill>") else {
+            output.push_str(candidate);
+            return trim_preserving_inner_whitespace(&output);
+        };
+
+        output.push_str(&format!("[skill:{name}]"));
+        rest = &after_open[close_start + "</skill>".len()..];
+    }
+
+    output.push_str(rest);
+    trim_preserving_inner_whitespace(&output)
+}
+
+fn skill_attribute(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let end = tag[start..].find('"')?;
+    Some(tag[start..start + end].to_string())
+}
+
+fn trim_preserving_inner_whitespace(text: &str) -> String {
+    text.trim().to_string()
+}
+
+fn title_preview(text: &str) -> String {
+    preview_from_lines(text.lines().filter(|line| !is_skill_marker_line(line.trim())))
+}
+
 fn preview(text: &str) -> String {
-    text.lines()
+    preview_from_lines(text.lines())
+}
+
+fn preview_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> String {
+    lines
+        .into_iter()
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with("## "))
         .unwrap_or("<empty>")
         .chars()
         .take(80)
         .collect()
+}
+
+fn is_skill_marker_line(line: &str) -> bool {
+    line.starts_with("[skill:") && line.ends_with(']')
 }
 
 fn join_nonempty<'a>(texts: impl IntoIterator<Item = &'a str>) -> String {
@@ -792,6 +861,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::parse_timestamp;
     use std::path::PathBuf;
 
     #[test]
@@ -807,13 +877,10 @@ mod tests {
 
         assert_eq!(record.kind, WorkRecordKind::TerminalCommand);
         assert_eq!(record.cwd.as_deref(), Some("D:\\sivtr"));
+        assert_eq!(record.time.ended_at.as_deref().and_then(parse_timestamp), parse_timestamp("2026-05-23T12:00:00Z"));
         assert_eq!(
-            record.time.ended_at.as_deref(),
-            Some("2026-05-23T12:00:00.000Z")
-        );
-        assert_eq!(
-            record.time.started_at.as_deref(),
-            Some("2026-05-23T11:59:59.958+00:00")
+            record.time.started_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T11:59:59.958Z")
         );
         assert_eq!(record.time.duration_ms, Some(42));
         assert_eq!(record.status.outcome, WorkOutcome::Failure);
@@ -860,12 +927,12 @@ mod tests {
         );
         assert_eq!(records[0].text.output, None);
         assert_eq!(
-            records[0].time.started_at.as_deref(),
-            Some("2026-05-23T12:01:00Z")
+            records[0].time.started_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T12:01:00Z")
         );
         assert_eq!(
-            records[0].time.ended_at.as_deref(),
-            Some("2026-05-23T12:03:00Z")
+            records[0].time.ended_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T12:03:00Z")
         );
         assert_eq!(records[0].time.duration_ms, Some(120_000));
     }
@@ -907,13 +974,70 @@ mod tests {
         assert_eq!(records[0].text.input.as_deref(), Some("implement this"));
         assert_eq!(records[0].text.output.as_deref(), Some("done"));
         assert_eq!(
-            records[0].time.started_at.as_deref(),
-            Some("2026-05-23T12:01:00Z")
+            records[0].time.started_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T12:01:00Z")
         );
         assert_eq!(
-            records[0].time.ended_at.as_deref(),
-            Some("2026-05-23T12:02:00Z")
+            records[0].time.ended_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T12:02:00Z")
         );
         assert_eq!(records[0].time.duration_ms, Some(60_000));
+    }
+
+    #[test]
+    fn chat_turn_records_compact_skill_blocks() {
+        let session = AgentSession {
+            path: PathBuf::from("pi-session.jsonl"),
+            id: Some("abcdef123456".to_string()),
+            cwd: Some("D:\\sivtr".to_string()),
+            title: None,
+            blocks: vec![
+                AgentBlock {
+                    kind: AgentBlockKind::User,
+                    timestamp: Some("2026-05-23T12:01:00Z".to_string()),
+                    label: None,
+                    text: "<skill name=\"sivtr-memory\" location=\"C:\\x\\SKILL.md\">\nlong instructions\n</skill>\n\nreal task".to_string(),
+                },
+                AgentBlock {
+                    kind: AgentBlockKind::Assistant,
+                    timestamp: Some("2026-05-23T12:02:00Z".to_string()),
+                    label: None,
+                    text: "done".to_string(),
+                },
+            ],
+        };
+
+        let records = WorkRecord::chat_turns(AgentProvider::Pi, &session);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "real task");
+        assert_eq!(
+            records[0].text.input.as_deref(),
+            Some("[skill:sivtr-memory]\n\nreal task")
+        );
+        match &records[0].payload {
+            WorkPayload::ChatTurn {
+                user,
+                assistant,
+                messages,
+            } => {
+                assert_eq!(user, "[skill:sivtr-memory]\n\nreal task");
+                assert_eq!(assistant, "done");
+                assert_eq!(messages.len(), 2);
+                assert_eq!(messages[0].role, "user");
+                assert_eq!(messages[0].content, "[skill:sivtr-memory]\n\nreal task");
+                assert_eq!(
+                    messages[0].timestamp.as_deref().and_then(parse_timestamp),
+                    parse_timestamp("2026-05-23T12:01:00Z")
+                );
+                assert_eq!(messages[1].role, "assistant");
+                assert_eq!(messages[1].content, "done");
+                assert_eq!(
+                    messages[1].timestamp.as_deref().and_then(parse_timestamp),
+                    parse_timestamp("2026-05-23T12:02:00Z")
+                );
+            }
+            _ => panic!("expected chat payload"),
+        }
     }
 }

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+
+use crate::time;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionEntry {
@@ -310,15 +311,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 }
 
 fn normalize_timestamp(value: Option<String>) -> Option<String> {
-    let value = non_empty(value)?;
-    if let Ok(timestamp) = DateTime::parse_from_rfc3339(&value) {
-        return Some(
-            timestamp
-                .with_timezone(&Utc)
-                .to_rfc3339_opts(SecondsFormat::Millis, true),
-        );
-    }
-    Some(value)
+    time::normalize_timestamp(&non_empty(value)?)
 }
 
 fn reset_invalid_log_if_needed(path: &Path) -> Result<()> {

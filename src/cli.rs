@@ -4,7 +4,7 @@ use sivtr_core::ai::AgentProvider;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-pub(crate) const TIME_FILTER_HELP: &str = "Accepts RFC3339 timestamps, Unix seconds/milliseconds, or relative durations like 30m, 2h, 7d.";
+pub(crate) const TIME_FILTER_HELP: &str = "Accepts RFC3339 timestamps, Unix seconds/milliseconds, relative durations like 30m, 2h, 7d, or aliases like today, yesterday, tomorrow, this morning, this afternoon, this evening, tonight, and now.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SearchFieldArg {
@@ -384,7 +384,8 @@ Filters:
   --max-duration <dur>  Maximum command duration, e.g. 500ms, 2s, 1m
   --sort <sort>         newest, oldest, duration, duration-asc, exit-code, exit-code-asc
   --last <duration>     Time window, e.g. 30m, 2h, 7d
-  --since/--until       Absolute or relative time bounds
+  --since/--until       Absolute time, relative duration, or aliases: today, yesterday, tomorrow,
+                        this morning, this afternoon, this evening, tonight, now
   --latest <n>          Return the latest n matching records
   --exclude-current     Exclude the current agent session from agent searches
   --other               Alias for --exclude-current

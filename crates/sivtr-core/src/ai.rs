@@ -445,14 +445,20 @@ pub fn select_blocks(session: &AgentSession, selection: AgentSelection) -> Vec<A
 }
 
 pub fn format_blocks(blocks: &[AgentBlock]) -> String {
+    format_blocks_with_text(blocks, |block| block.text.trim().to_string())
+}
+
+pub fn format_blocks_with_text(
+    blocks: &[AgentBlock],
+    text_for_block: impl Fn(&AgentBlock) -> String,
+) -> String {
     if blocks.len() == 1 {
-        return blocks[0].text.trim().to_string();
+        return text_for_block(&blocks[0]).trim().to_string();
     }
 
     blocks
         .iter()
-        .filter(|block| !block.text.trim().is_empty())
-        .map(format_block_with_heading)
+        .filter_map(|block| format_block_with_heading(block, &text_for_block(block)))
         .collect::<Vec<_>>()
         .join("\n\n")
         .trim()
@@ -488,7 +494,12 @@ fn select_last_turn(blocks: &[AgentBlock]) -> Vec<AgentBlock> {
         .collect()
 }
 
-fn format_block_with_heading(block: &AgentBlock) -> String {
+fn format_block_with_heading(block: &AgentBlock, text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
     let heading = match block.kind {
         AgentBlockKind::User => "User".to_string(),
         AgentBlockKind::Assistant => "Assistant".to_string(),
@@ -500,5 +511,5 @@ fn format_block_with_heading(block: &AgentBlock) -> String {
         AgentBlockKind::ToolOutput => "Tool Output".to_string(),
     };
 
-    format!("## {heading}\n{}", block.text.trim())
+    Some(format!("## {heading}\n{text}"))
 }

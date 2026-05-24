@@ -188,6 +188,7 @@ mod tests {
         TerminalCommandMetadata,
     };
     use sivtr_core::session::{self, SessionState};
+    use sivtr_core::time::parse_timestamp;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -234,8 +235,8 @@ mod tests {
         );
         assert_eq!(entries[0].cwd.as_deref(), Some("D:\\sivtr"));
         assert_eq!(
-            entries[0].ended_at.as_deref(),
-            Some("2026-05-23T12:00:00.000Z")
+            entries[0].ended_at.as_deref().and_then(parse_timestamp),
+            parse_timestamp("2026-05-23T12:00:00Z")
         );
         assert_eq!(entries[0].duration_ms, Some(1234));
         assert_eq!(entries[0].exit_code, Some(0));

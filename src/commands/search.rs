@@ -28,8 +28,6 @@ struct SearchJsonOutput<'a> {
 struct SearchJsonMatch {
     #[serde(rename = "ref")]
     ref_: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<usize>,
     snippet: String,
 }
 
@@ -58,14 +56,12 @@ struct SearchResultGroup<'a> {
 #[derive(Clone)]
 struct SearchLineMatch {
     ref_: String,
-    line: Option<usize>,
     snippet: String,
 }
 
 struct SearchMatch<'a> {
     record: &'a WorkRecord,
     ref_: String,
-    line: Option<usize>,
     snippet: String,
 }
 
@@ -163,10 +159,7 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         println!("{}", result.ref_);
         println!("  {}", result.record.title);
         for matched in result.matches {
-            match matched.line {
-                Some(line) => println!("  - {} line {}: {}", matched.ref_, line, matched.snippet),
-                None => println!("  - {}: {}", matched.ref_, matched.snippet),
-            }
+            println!("  - {}: {}", matched.ref_, matched.snippet);
         }
     }
 
@@ -425,7 +418,6 @@ fn matching_refs<'a>(
         return vec![SearchMatch {
             record,
             ref_: ref_.clone(),
-            line: target.line_index,
             snippet: match target.line_index {
                 Some(line) => combined_text(record)
                     .lines()
@@ -444,7 +436,6 @@ fn matching_refs<'a>(
             return vec![SearchMatch {
                 record,
                 ref_: record.work_ref.with_line(line).to_string(),
-                line: Some(line),
                 snippet: snippet(text),
             }];
         }
@@ -459,7 +450,6 @@ fn matching_refs<'a>(
             .map(|(idx, line)| SearchMatch {
                 record,
                 ref_: record.work_ref.with_line(idx + 1).to_string(),
-                line: Some(idx + 1),
                 snippet: snippet(line),
             })
             .collect::<Vec<_>>();
@@ -472,7 +462,6 @@ fn matching_refs<'a>(
         return vec![SearchMatch {
             record,
             ref_: record.work_ref.to_string(),
-            line: None,
             snippet: record_snippet(record, field),
         }];
     }
@@ -568,7 +557,6 @@ fn group_results(matches: Vec<SearchMatch<'_>>) -> Vec<SearchResultGroup<'_>> {
         if let Some(group) = results.iter_mut().find(|group| group.ref_ == record_ref) {
             group.matches.push(SearchLineMatch {
                 ref_: matched.ref_,
-                line: matched.line,
                 snippet: matched.snippet,
             });
         } else {
@@ -577,7 +565,6 @@ fn group_results(matches: Vec<SearchMatch<'_>>) -> Vec<SearchResultGroup<'_>> {
                 ref_: record_ref.clone(),
                 matches: vec![SearchLineMatch {
                     ref_: matched.ref_,
-                    line: matched.line,
                     snippet: matched.snippet,
                 }],
             });
@@ -752,7 +739,6 @@ fn search_json_item(result: SearchResultGroup<'_>) -> SearchJsonItem {
             .into_iter()
             .map(|matched| SearchJsonMatch {
                 ref_: matched.ref_,
-                line: matched.line,
                 snippet: matched.snippet,
             })
             .collect(),
@@ -812,6 +798,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["terminal/session_1/3/2", "terminal/session_1/3/3"]
         );
+    }
+
+    #[test]
+    fn json_matches_do_not_include_line_field() {
+        let record = test_terminal_record("terminal/session_1/3", "alpha\nneedle");
+        let target = parse_target("terminal/session_1/3").unwrap();
+        let regex = Regex::new("needle").unwrap();
+        let group = group_results(matching_refs(
+            &record,
+            &target,
+            SearchFieldArg::Content,
+            Some(&regex),
+        ))
+        .remove(0);
+
+        let value = serde_json::to_value(search_json_item(group)).unwrap();
+
+        assert!(value["matches"][0].get("line").is_none());
+        assert_eq!(value["matches"][0]["ref"], "terminal/session_1/3/2");
     }
 
     #[test]
