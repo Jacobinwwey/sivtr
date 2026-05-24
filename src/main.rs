@@ -55,8 +55,8 @@ fn run() -> Result<()> {
         Some(Commands::Config(cfg_cmd)) => {
             commands::config::execute(cfg_cmd)?;
         }
-        Some(Commands::Init { shell }) => {
-            commands::init::execute(&shell)?;
+        Some(Commands::Init { target }) => {
+            commands::init::execute(&target)?;
         }
         Some(Commands::Copy(args)) => match args.mode {
             Some(CopySubcommand::In(sub_args)) => run_copy(&sub_args, CopyMode::InputOnly, true)?,

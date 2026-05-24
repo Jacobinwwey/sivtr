@@ -263,15 +263,16 @@ pub fn execute(shell: &str) -> Result<()> {
         "bash" => install_single_shell_hook(&bash_profile_path()?, &BASH_SPEC),
         "zsh" => install_single_shell_hook(&zsh_profile_path()?, &ZSH_SPEC),
         "nu" | "nushell" => install_single_shell_hook(&nushell_config_path()?, &NUSHELL_SPEC),
+        "all" | "-all" | "--all" => install_all_shell_hooks(),
         "tmux" => install_tmux_shortcut(),
         "linux-shortcut" => install_linux_shortcut(),
         "macos-shortcut" => install_macos_shortcut(),
         _ => {
             eprintln!(
-                "sivtr: supported targets are powershell, bash, zsh, nushell, tmux, linux-shortcut, macos-shortcut"
+                "sivtr: supported targets are powershell, bash, zsh, nushell, all, tmux, linux-shortcut, macos-shortcut"
             );
             eprintln!(
-                "  usage: sivtr init <powershell|bash|zsh|nushell|tmux|linux-shortcut|macos-shortcut>"
+                "  usage: sivtr init <powershell|bash|zsh|nushell|all|tmux|linux-shortcut|macos-shortcut>"
             );
             std::process::exit(1);
         }
@@ -301,6 +302,14 @@ fn install_powershell_hook() -> Result<()> {
         eprintln!("sivtr: failed to update {path}");
         eprintln!("  {err}");
     }
+    Ok(())
+}
+
+fn install_all_shell_hooks() -> Result<()> {
+    install_powershell_hook()?;
+    install_single_shell_hook(&bash_profile_path()?, &BASH_SPEC)?;
+    install_single_shell_hook(&zsh_profile_path()?, &ZSH_SPEC)?;
+    install_single_shell_hook(&nushell_config_path()?, &NUSHELL_SPEC)?;
     Ok(())
 }
 

@@ -354,8 +354,9 @@ pub enum Commands {
 
     /// Generate shell integration or Linux shortcut helpers
     Init {
-        /// Integration target: powershell, bash, zsh, nushell, tmux, linux-shortcut
-        shell: String,
+        /// Integration target: powershell, bash, zsh, nushell, all, tmux, linux-shortcut
+        #[arg(value_name = "TARGET", allow_hyphen_values = true)]
+        target: String,
     },
 
     /// Copy recent command blocks to clipboard
@@ -1243,7 +1244,7 @@ mod tests {
         let cli = Cli::try_parse_from(["sivtr", "init", "tmux"]).unwrap();
 
         match cli.command {
-            Some(Commands::Init { shell }) => assert_eq!(shell, "tmux"),
+            Some(Commands::Init { target }) => assert_eq!(target, "tmux"),
             _ => panic!("expected init command"),
         }
     }
@@ -1253,7 +1254,27 @@ mod tests {
         let cli = Cli::try_parse_from(["sivtr", "init", "linux-shortcut"]).unwrap();
 
         match cli.command {
-            Some(Commands::Init { shell }) => assert_eq!(shell, "linux-shortcut"),
+            Some(Commands::Init { target }) => assert_eq!(target, "linux-shortcut"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_all_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "all"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { target }) => assert_eq!(target, "all"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_dash_all_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "-all"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { target }) => assert_eq!(target, "-all"),
             _ => panic!("expected init command"),
         }
     }
