@@ -347,16 +347,18 @@ impl WorkRecord {
                 output,
                 prompt_ansi,
                 output_ansi,
-            } => terminal_record_text(
-                mode,
-                prompt,
-                command,
-                output,
-                prompt_ansi.as_deref(),
-                output_ansi.as_deref(),
-                include_prompt,
-                None,
-            ),
+            } => {
+                let context = TerminalTextContext {
+                    prompt,
+                    command,
+                    output,
+                    prompt_ansi: prompt_ansi.as_deref(),
+                    output_ansi: output_ansi.as_deref(),
+                    include_prompt,
+                    prompt_override: None,
+                };
+                terminal_record_text(mode, context)
+            }
             WorkPayload::ChatTurn { .. } => chat_record_text(self, mode),
         }
     }
@@ -374,16 +376,18 @@ impl WorkRecord {
                 output,
                 prompt_ansi,
                 output_ansi,
-            } => terminal_record_text(
-                mode,
-                prompt,
-                command,
-                output,
-                prompt_ansi.as_deref(),
-                output_ansi.as_deref(),
-                include_prompt,
-                prompt_override,
-            ),
+            } => {
+                let context = TerminalTextContext {
+                    prompt,
+                    command,
+                    output,
+                    prompt_ansi: prompt_ansi.as_deref(),
+                    output_ansi: output_ansi.as_deref(),
+                    include_prompt,
+                    prompt_override,
+                };
+                terminal_record_text(mode, context)
+            }
             WorkPayload::ChatTurn { .. } => chat_record_text(self, mode),
         }
     }
@@ -418,43 +422,44 @@ impl WorkRecord {
     }
 }
 
-fn terminal_record_text(
-    mode: RecordTextMode,
-    prompt: &str,
-    command: &str,
-    output: &str,
-    prompt_ansi: Option<&str>,
-    output_ansi: Option<&str>,
+struct TerminalTextContext<'a> {
+    prompt: &'a str,
+    command: &'a str,
+    output: &'a str,
+    prompt_ansi: Option<&'a str>,
+    output_ansi: Option<&'a str>,
     include_prompt: bool,
-    prompt_override: Option<&str>,
-) -> RecordText {
+    prompt_override: Option<&'a str>,
+}
+
+fn terminal_record_text(mode: RecordTextMode, context: TerminalTextContext<'_>) -> RecordText {
     match mode {
         RecordTextMode::Combined => {
             let input = terminal_input_text(
-                prompt,
-                command,
-                prompt_ansi,
-                include_prompt,
-                prompt_override,
+                context.prompt,
+                context.command,
+                context.prompt_ansi,
+                context.include_prompt,
+                context.prompt_override,
             );
-            let output_ansi = output_ansi.unwrap_or(output).to_string();
+            let output_ansi = context.output_ansi.unwrap_or(context.output).to_string();
             RecordText::with_ansi(
-                join_terminal_input_output(&input.plain, output),
+                join_terminal_input_output(&input.plain, context.output),
                 join_terminal_input_output(input.rendered(true), &output_ansi),
             )
         }
         RecordTextMode::Input => terminal_input_text(
-            prompt,
-            command,
-            prompt_ansi,
-            include_prompt,
-            prompt_override,
+            context.prompt,
+            context.command,
+            context.prompt_ansi,
+            context.include_prompt,
+            context.prompt_override,
         ),
         RecordTextMode::Output => RecordText::with_ansi(
-            output.to_string(),
-            output_ansi.unwrap_or(output).to_string(),
+            context.output.to_string(),
+            context.output_ansi.unwrap_or(context.output).to_string(),
         ),
-        RecordTextMode::Command => RecordText::plain(command.to_string()),
+        RecordTextMode::Command => RecordText::plain(context.command.to_string()),
     }
 }
 

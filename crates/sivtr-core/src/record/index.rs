@@ -53,7 +53,7 @@ mod tests {
     }
 
     fn test_record(
-        ref_id: &str,
+        _ref_id: &str,
         session_id: &str,
         turn_index: usize,
         combined: &str,

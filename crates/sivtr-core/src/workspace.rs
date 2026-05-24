@@ -94,7 +94,7 @@ pub fn terminal_log_paths_for_workspace(cwd: &Path) -> Result<Vec<PathBuf>> {
             logs.push(path);
         }
     }
-    logs.sort_by(|a, b| modified_time(b).cmp(&modified_time(a)));
+    logs.sort_by_key(|path| std::cmp::Reverse(modified_time(path)));
     Ok(logs)
 }
 
