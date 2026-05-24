@@ -1,6 +1,6 @@
 ---
 name: sivtr-memory
-description: Use when an agent needs shared local work memory across terminal commands and output, AI conversation history, recent failures, prior decisions, handoff context, recap context, or validation evidence.
+description: "Retrieve shared local work memory: terminal activity, AI conversation history, prior decisions, validation evidence, debugging trails, recaps, and handoff context. Use before asking the user to repeat local work context."
 ---
 
 # Sivtr Memory
@@ -13,47 +13,46 @@ Core rule:
 
 > Search for evidence first. Expand only the smallest relevant context. Ask when memory is missing, ambiguous, stale, or permission is required.
 
-Memory is evidence, not truth. Verify current files or commands before claiming current state.
-
 ## When to Use
 
-Use this skill when the user says or implies any of these:
+Use this skill whenever local work memory may contain useful evidence. Sivtr is the shared retrieval layer for recent terminal
+activity, AI conversation history, prior decisions, validation output, and
+handoff context.
 
-- "刚才报错了", "the last command failed", "look at the error"
-- "继续", "continue", "接着做", "resume from earlier"
-- "上次怎么说的", "what did we decide before", "why did we choose X"
-- "找一下那个报错", "search previous output", "find the failure"
-- "handoff", "summarize what happened", "write a recap"
-- You need evidence for a claim about recent build/test/lint/deploy output
-- You need prior AI discussion, project decisions, rejected approaches, or debugging trails
+Use it before asking the user to repeat context when you need to know things
+like:
 
-Also use it proactively during debugging when command output is missing, truncated, or too large for the current context.
+- what just happened in the terminal or an agent session
+- what command was run, what output it produced, or whether validation passed
+- what the user or a previous agent decided, rejected, or planned
+- where earlier debugging, build, test, lint, deploy, or research work left off
+- what evidence supports a recap, handoff, status update, or next step
+- whether missing or truncated current-context output exists in local memory
 
-## First Check
-
-Before relying on sivtr in a new environment, run:
-
-```bash
-sivtr --version
-```
-
-If that fails, the skill cannot retrieve shared memory. Continue with normal shell/file inspection and mention the missing CLI only if it affects the task.
+Do not use Sivtr as truth by itself. Treat memory as evidence to retrieve, then
+verify current files or commands before making claims about current state.
 
 ## Default Retrieval Workflow
 
 1. Convert the user's vague reference into a query.
-2. Search with a small limit and JSON output.
+2. Search with a small limit and JSON output. When the user means terminal
+   evidence, use `--shell`; when the user means AI/agent conversation evidence,
+   use `--agent`; when the user names a provider or time window, use
+   `--provider` and `--recent`/`--since` instead of putting those words into the
+   content query.
+   - For "latest terminal error" / "最新终端报错", start with:
+     `sivtr search "Error|error|failed|fatal|not found|External command failed" --shell --json --limit 20`.
 3. Inspect result source/session/dialogue/snippet.
 4. If the snippet is enough, answer with evidence.
-5. If more context is needed, expand with `sivtr copy ... --print` or a narrower second search.
+5. If more context is needed, expand the returned ref with `sivtr show ... --json` or run a narrower second search.
 6. Ask the user only after local memory has been checked and still lacks the needed fact.
 
 ## Non-Interactive Safety Rules
 
-- Prefer non-interactive commands: `sivtr search ... --json`, `sivtr copy ... --print`.
+- Prefer non-interactive commands: `sivtr search ... --json`, `sivtr show ... --json`.
 - Do not open TUI pickers (`--pick`, hotkey picker) unless the user explicitly wants interactive selection.
 - Do not run `sivtr clear`, hotkey start/stop, shell init, or config mutation unless the user explicitly asks.
-- `sivtr copy` can affect the clipboard unless `--print` is used. Agents should use `--print` by default.
+- Avoid clipboard-oriented workflows in agent retrieval. Use refs from `search` and expand them with `show`.
 - Avoid dumping huge histories into the model. Search narrowly first, then expand only the relevant block/dialogue.
 - If `sivtr` is not installed or no session log exists, say so briefly and continue with normal tools. Do not invent memory results.
 

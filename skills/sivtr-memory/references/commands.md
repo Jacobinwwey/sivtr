@@ -5,11 +5,53 @@ Prefer small, targeted queries over dumping large histories.
 
 ## Search Commands
 
+### Search option reference
+
+`sivtr search` takes a regex query and composable filters. Prefer filters for
+metadata and keep the query focused on the thing to find.
+
+```bash
+sivtr search "<query>" \
+  --shell|--agent \
+  --provider <all|codex|claude|pi|opencode> \
+  --scope <content|dialogue|session> \
+  --cwd <path> \
+  --recent <count|duration> \
+  --since <time> \
+  --until <time> \
+  --json \
+  --limit <n>
+```
+
+- `--shell`: search terminal command records only. Use this for "latest terminal error" / "刚才终端报错".
+- `--agent`: search AI/agent conversation records only. Use with `--provider` when the user names a provider, such as "pi 中的", "codex 里", or "Claude 上次".
+- `--scope content`: search matched text/content; this is the default.
+- `--scope dialogue`: search dialogue or command block titles.
+- `--scope session`: search session titles.
+- `--cwd`: choose the workspace used to resolve current AI sessions. Omit it
+  when already running in the target repo.
+- `--recent`: search only recent content. Accepts counts (`20`) or durations
+  (`30m`, `2h`, `7d`).
+- `--since` / `--until`: bound search by RFC3339 time, Unix seconds/millis, or
+  relative durations.
+- `--limit`: cap results. Start at `20`; use `30` for handoff/recap.
+- `--json`: required for agent use unless the user explicitly wants raw text.
+
 ### General search
 
 ```bash
 sivtr search "<case-insensitive-regex>" --json --limit 20
 ```
+
+### Search latest terminal errors
+
+For "最新终端报错" / "刚才终端报错", search shell records directly, then expand the newest shell ref.
+
+```bash
+sivtr search "Error|error|failed|fatal|panic|Traceback|Exception|exit code|not found|External command failed|No such file or directory|permission denied|is not recognized" --shell --json --limit 20
+```
+
+If the returned ref ends with a line number, remove the trailing line segment and run `sivtr show "<block-ref>" --json` before answering.
 
 ### Search terminal + AI memory for common errors
 
@@ -38,7 +80,7 @@ sivtr search "Traceback|ModuleNotFoundError|ImportError|AssertionError|pytest|FA
 ### Previous decisions or AI discussion
 
 ```bash
-sivtr search "lazy load|workspace TUI|metadata scan|decision|TODO|next step" --json --limit 20
+sivtr search "lazy load|workspace TUI|metadata scan|decision|TODO|next step" --agent --json --limit 20
 ```
 
 ### Search titles instead of content
@@ -51,9 +93,29 @@ sivtr search "cargo test" --scope dialogue --json --limit 20
 ### Provider-specific search
 
 ```bash
-sivtr search "<query>" --provider codex --json --limit 20
-sivtr search "<query>" --provider claude --json --limit 20
+sivtr search "<query>" --agent --provider codex --json --limit 20
+sivtr search "<query>" --agent --provider claude --json --limit 20
+sivtr search "<query>" --agent --provider pi --json --limit 20
+sivtr search "<query>" --agent --provider opencode --json --limit 20
 ```
+
+### Compose filters from the request
+
+Map request constraints to options instead of hard-coding scenario-specific
+queries. Keep the regex query for the content/topic being searched.
+
+```bash
+sivtr search "<topic>" --agent --provider <provider> --recent <duration> --json --limit 20
+sivtr search "<topic>|<related-term>|<status-term>" --agent --provider <provider> --recent <duration> --json --limit 30
+sivtr search "<topic>" --scope <content|dialogue|session> --cwd <path> --json --limit 20
+```
+
+Examples of the mapping:
+
+- "pi 中的 merge" -> query `merge`, options `--agent --provider pi`
+- "最近两小时的终端报错" -> error query, options `--shell --recent 2h`
+- "这个仓库上次的 CI 失败" -> CI/failure query, option `--cwd <repo>`
+- "标题里有 workspace picker" -> query `workspace picker`, option `--scope session` or `--scope dialogue`
 
 ## JSON Handling
 
@@ -106,31 +168,16 @@ Refs have this shape:
 source/session[/dialogue[/line]]
 ```
 
-### Last command output
+When a search result points to a single line but the surrounding block matters,
+show the block ref by removing the trailing line segment. For example, expand
+`terminal/session_8620/8/3` with:
 
 ```bash
-sivtr copy out 1 --print
+sivtr show "terminal/session_8620/8" --json
 ```
 
-### Last command input + output
-
-```bash
-sivtr copy 1 --print
-```
-
-### Recent command list only
-
-```bash
-sivtr copy cmd 1..10 --print
-```
-
-### A small recent range
-
-```bash
-sivtr copy 1..3 --print
-```
-
-Do not copy large ranges unless the task explicitly requires a full transcript.
+Avoid clipboard-oriented `copy` workflows in agent skills; they are primarily
+for human selection and clipboard use.
 
 ## Query Construction Tips
 
@@ -145,6 +192,4 @@ Do not copy large ranges unless the task explicitly requires a full transcript.
 - Use `--limit 30` only for handoff or recap work.
 - Narrow the query before increasing the limit.
 - Prefer `sivtr show "<ref>" --json` when search returns a useful ref.
-- Prefer `sivtr copy out 1 --print` for the latest output.
-- Prefer `sivtr copy 1..3 --print` for a small range.
-- Avoid ranges larger than `1..10` unless the task needs a transcript.
+- If the shown line is too narrow, remove the trailing line segment from the ref and show the whole block.

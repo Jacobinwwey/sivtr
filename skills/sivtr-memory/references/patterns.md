@@ -7,16 +7,26 @@ Command syntax itself lives in `references/commands.md`.
 
 When the user says the last command failed, search for the likely error first.
 
-- Start with the error search from `commands.md`
+- For terminal failures, use the shell alias search from `commands.md` (`sivtr search ... --shell --json ...`) so AI discussion does not outrank terminal evidence.
+- Use `--agent` only when the user asks for AI/agent conversation history or prior discussion.
 - Narrow by tool or language if the project is obvious
 - If search returns a useful `ref`, expand it with `sivtr show "<ref>" --json`
-- If there is no useful ref and the latest terminal output matters, expand only the latest output
+- If the returned ref points to one line but surrounding context matters, remove the trailing line segment and show the whole block ref
+- If search finds no useful ref, run a narrower search with better constraints before asking the user
 - Then inspect the related files and verify locally
 
 ## Continue work
 
 When the user says "continue", reconstruct the active thread before guessing.
 
+- Extract structured constraints from the user's wording before constructing
+  the search: provider/source, cwd/workspace, time window, content topic, and
+  whether they mean content, dialogue title, or session title.
+- Express structured constraints with search options (`--shell`, `--agent`,
+  `--provider`, `--cwd`, `--recent`, `--since`, `--until`, `--scope`) instead
+  of embedding them in the regex query.
+- Start with a broad content topic. If sparse, expand the query with related
+  terms while keeping the same structured filters.
 - Search for `next step`, `TODO`, `blocked`, `decision`, `commit`, `test result`, `passed`, and `failed`
 - Use returned refs to expand only the most relevant dialogue or line
 - If one thread is obvious, summarize it and keep going
@@ -37,7 +47,7 @@ When another agent needs to continue the work:
 
 - Search for goal, next step, decisions, and validation evidence
 - Expand refs for the few strongest matches
-- Pull only a small command range when refs do not capture the needed terminal context
+- Prefer expanding returned refs with `show`; if refs do not capture the needed context, run a narrower search before asking
 - Report goal, current state, evidence, tests, risks, and next step
 
 ## Recap
