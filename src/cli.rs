@@ -125,6 +125,42 @@ impl std::fmt::Display for SearchSortArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchOutputFormatArg {
+    Compact,
+    Timeline,
+    Md,
+    #[default]
+    Json,
+}
+
+impl FromStr for SearchOutputFormatArg {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "compact" => Ok(Self::Compact),
+            "timeline" => Ok(Self::Timeline),
+            "md" | "markdown" => Ok(Self::Md),
+            "json" => Ok(Self::Json),
+            _ => Err(format!(
+                "unknown search format `{value}`; expected timeline, compact, md, or json"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for SearchOutputFormatArg {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Compact => "compact",
+            Self::Timeline => "timeline",
+            Self::Md => "md",
+            Self::Json => "json",
+        })
+    }
+}
+
 const COPY_AFTER_HELP: &str = "\
 Defaults:
   `sivtr copy` copies the last command block.
@@ -389,14 +425,15 @@ Filters:
   --latest <n>          Return the latest n matching records
   --exclude-current     Exclude the current agent session from agent searches
   --other               Alias for --exclude-current
+  --format <format>    Output format: timeline, compact, md, or json
 
 Examples:
-  sivtr search terminal --status failure --latest 1 --json
-  sivtr search terminal --match "panic|failed" --latest 20 --json
-  sivtr search pi --match "merge|conflict" --latest 20 --json
-  sivtr search pi/019e5941 --match "cargo test" --json
-  sivtr search pi/019e5941/7 --json
-  sivtr search terminal/session_13104/3/12 --json
+  sivtr search terminal --status failure --latest 1 --format json
+  sivtr search terminal --match "panic|failed" --latest 20 --format compact
+  sivtr search pi --match "merge|conflict" --latest 20 --format timeline
+  sivtr search pi/019e5941 --match "cargo test" --format md
+  sivtr search pi/019e5941/7 --format json
+  sivtr search terminal/session_13104/3/12 --format json
 "##;
 
 const HOTKEY_AFTER_HELP: &str = "\
@@ -698,9 +735,9 @@ pub struct SearchArgs {
     #[arg(long = "exclude-current", alias = "other")]
     pub exclude_current: bool,
 
-    /// Print machine-readable JSON
-    #[arg(long)]
-    pub json: bool,
+    /// Output format: timeline, compact, md, or json
+    #[arg(long, default_value_t = SearchOutputFormatArg::default(), value_name = "FORMAT")]
+    pub format: SearchOutputFormatArg,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1140,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn search_accepts_target_filters_and_json() {
+    fn search_accepts_target_filters_and_format() {
         let cli = Cli::try_parse_from([
             "sivtr",
             "search",
@@ -1151,7 +1188,8 @@ mod tests {
             "title",
             "--status",
             "unknown",
-            "--json",
+            "--format",
+            "timeline",
             "--limit",
             "5",
         ])
@@ -1167,7 +1205,7 @@ mod tests {
                 assert_eq!(args.min_duration, None);
                 assert_eq!(args.max_duration, None);
                 assert_eq!(args.sort, SearchSortArg::Newest);
-                assert!(args.json);
+                assert_eq!(args.format, SearchOutputFormatArg::Timeline);
                 assert_eq!(args.limit, Some(5));
                 assert_eq!(args.since, None);
                 assert_eq!(args.until, None);
@@ -1244,13 +1282,24 @@ mod tests {
 
     #[test]
     fn search_target_accepts_line_segment() {
-        let cli =
-            Cli::try_parse_from(["sivtr", "search", "terminal/session_1/3/2", "--json"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "search",
+            "terminal/session_1/3/2",
+            "--format",
+            "json",
+        ])
+        .unwrap();
 
         match cli.command {
             Some(Commands::Search(args)) => assert_eq!(args.target, "terminal/session_1/3/2"),
             _ => panic!("expected search command"),
         }
+    }
+
+    #[test]
+    fn search_rejects_old_json_flag() {
+        assert!(Cli::try_parse_from(["sivtr", "search", "agent", "--json"]).is_err());
     }
 
     #[test]

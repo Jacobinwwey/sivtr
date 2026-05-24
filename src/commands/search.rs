@@ -8,7 +8,9 @@ use serde::Serialize;
 use sivtr_core::ai::{AgentProvider, AgentSessionProvider};
 use sivtr_core::record::{RecordTextMode, WorkOutcome, WorkRecord, WorkRecordKind, WorkRef};
 
-use crate::cli::{SearchArgs, SearchFieldArg, SearchSortArg, SearchStatusArg};
+use crate::cli::{
+    SearchArgs, SearchFieldArg, SearchOutputFormatArg, SearchSortArg, SearchStatusArg,
+};
 use crate::commands::records::current_work_record_index;
 use crate::commands::time_filter::build_time_range;
 
@@ -136,31 +138,22 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         results.truncate(limit);
     }
 
-    if args.json {
-        let json = SearchJsonOutput {
-            target: &args.target,
-            match_: args.match_.as_deref(),
-            field: field_name(args.in_field),
-            sort: sort_name(args.sort),
-            cwd: cwd.display().to_string(),
-            count: results.len(),
-            results: results.into_iter().map(search_json_item).collect(),
-        };
-        println!("{}", serde_json::to_string_pretty(&json)?);
-        return Ok(());
-    }
-
-    if results.is_empty() {
-        println!("No matches in `{}`", args.target);
-        return Ok(());
-    }
-
-    for result in results {
-        println!("{}", result.ref_);
-        println!("  {}", result.record.title);
-        for matched in result.matches {
-            println!("  - {}: {}", matched.ref_, matched.snippet);
+    match args.format {
+        SearchOutputFormatArg::Json => {
+            let json = SearchJsonOutput {
+                target: &args.target,
+                match_: args.match_.as_deref(),
+                field: field_name(args.in_field),
+                sort: sort_name(args.sort),
+                cwd: cwd.display().to_string(),
+                count: results.len(),
+                results: results.into_iter().map(search_json_item).collect(),
+            };
+            println!("{}", serde_json::to_string_pretty(&json)?);
         }
+        SearchOutputFormatArg::Compact => print_compact_results(&results),
+        SearchOutputFormatArg::Timeline => print_timeline_results(&results),
+        SearchOutputFormatArg::Md => print_markdown_results(&results),
     }
 
     Ok(())
@@ -743,6 +736,85 @@ fn search_json_item(result: SearchResultGroup<'_>) -> SearchJsonItem {
             })
             .collect(),
     }
+}
+
+fn print_compact_results(results: &[SearchResultGroup<'_>]) {
+    for result in results {
+        println!(
+            "{}  {:<8}  {}",
+            short_time(result.record),
+            source_label(result.record),
+            result.record.title
+        );
+    }
+}
+
+fn print_timeline_results(results: &[SearchResultGroup<'_>]) {
+    let mut previous_timestamp: Option<chrono::DateTime<chrono::Utc>> = None;
+    for result in results {
+        let timestamp = result
+            .record
+            .time
+            .primary_at()
+            .and_then(sivtr_core::time::parse_timestamp);
+        if let (Some(previous), Some(current)) = (previous_timestamp, timestamp) {
+            let gap_minutes = (current - previous).num_minutes();
+            if gap_minutes >= 15 {
+                println!("          -- gap {gap_minutes}m --");
+            }
+        }
+        if timestamp.is_some() {
+            previous_timestamp = timestamp;
+        }
+
+        println!(
+            "{}  {:<8}  {:<28}  {}",
+            short_time(result.record),
+            source_label(result.record),
+            result.ref_,
+            result.record.title
+        );
+    }
+}
+
+fn print_markdown_results(results: &[SearchResultGroup<'_>]) {
+    for result in results {
+        println!(
+            "- **{}** `{}` {}",
+            short_time(result.record),
+            result.ref_,
+            escape_markdown_title(&result.record.title)
+        );
+    }
+}
+
+fn short_time(record: &WorkRecord) -> String {
+    record
+        .time
+        .primary_at()
+        .and_then(sivtr_core::time::parse_timestamp)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&chrono::Local)
+                .format("%H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| "--:--:--".to_string())
+}
+
+fn source_label(record: &WorkRecord) -> &'static str {
+    match record.kind {
+        WorkRecordKind::TerminalCommand => "terminal",
+        WorkRecordKind::ChatTurn => record
+            .work_ref
+            .provider()
+            .map(|provider| provider.command_name())
+            .unwrap_or("agent"),
+    }
+}
+
+fn escape_markdown_title(title: &str) -> String {
+    title.replace('[', "\\[").replace(']', "\\]")
 }
 
 #[cfg(test)]
