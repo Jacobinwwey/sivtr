@@ -83,6 +83,48 @@ impl std::fmt::Display for SearchStatusArg {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchSortArg {
+    #[default]
+    Newest,
+    Oldest,
+    Duration,
+    DurationAsc,
+    ExitCode,
+    ExitCodeAsc,
+}
+
+impl FromStr for SearchSortArg {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "newest" | "latest" | "time" | "time-desc" => Ok(Self::Newest),
+            "oldest" | "time-asc" => Ok(Self::Oldest),
+            "duration" | "duration-desc" | "longest" => Ok(Self::Duration),
+            "duration-asc" | "shortest" => Ok(Self::DurationAsc),
+            "exit-code" | "exit_code" | "exit" | "exit-desc" => Ok(Self::ExitCode),
+            "exit-code-asc" | "exit_code_asc" | "exit-asc" => Ok(Self::ExitCodeAsc),
+            _ => Err(format!(
+                "unknown search sort `{value}`; expected newest, oldest, duration, duration-asc, exit-code, or exit-code-asc"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for SearchSortArg {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Newest => "newest",
+            Self::Oldest => "oldest",
+            Self::Duration => "duration",
+            Self::DurationAsc => "duration-asc",
+            Self::ExitCode => "exit-code",
+            Self::ExitCodeAsc => "exit-code-asc",
+        })
+    }
+}
+
 const COPY_AFTER_HELP: &str = "\
 Defaults:
   `sivtr copy` copies the last command block.
@@ -337,6 +379,10 @@ Filters:
   --match <regex>       Case-insensitive regex content filter
   --in <field>          content, title, session, input, output, command, or all
   --status <status>     success, failure, or unknown
+  --exit-code <code>    Exact terminal process exit code
+  --min-duration <dur>  Minimum command duration, e.g. 500ms, 2s, 1m
+  --max-duration <dur>  Maximum command duration, e.g. 500ms, 2s, 1m
+  --sort <sort>         newest, oldest, duration, duration-asc, exit-code, exit-code-asc
   --last <duration>     Time window, e.g. 30m, 2h, 7d
   --since/--until       Absolute or relative time bounds
   --latest <n>          Return the latest n matching records
@@ -604,6 +650,22 @@ pub struct SearchArgs {
     /// Record status filter: success, failure, or unknown
     #[arg(long, value_name = "STATUS")]
     pub status: Option<SearchStatusArg>,
+
+    /// Exact terminal process exit code filter
+    #[arg(long, value_name = "CODE")]
+    pub exit_code: Option<i32>,
+
+    /// Minimum command duration filter, e.g. 500ms, 2s, 1m
+    #[arg(long, value_name = "DURATION")]
+    pub min_duration: Option<String>,
+
+    /// Maximum command duration filter, e.g. 500ms, 2s, 1m
+    #[arg(long, value_name = "DURATION")]
+    pub max_duration: Option<String>,
+
+    /// Result sort: newest, oldest, duration, duration-asc, exit-code, or exit-code-asc
+    #[arg(long, default_value_t = SearchSortArg::default(), value_name = "SORT")]
+    pub sort: SearchSortArg,
 
     /// Workspace directory used to resolve current AI sessions
     #[arg(long, value_name = "PATH")]
@@ -1094,6 +1156,10 @@ mod tests {
                 assert_eq!(args.match_.as_deref(), Some("workspace picker"));
                 assert_eq!(args.in_field, SearchFieldArg::Title);
                 assert_eq!(args.status, Some(SearchStatusArg::Unknown));
+                assert_eq!(args.exit_code, None);
+                assert_eq!(args.min_duration, None);
+                assert_eq!(args.max_duration, None);
+                assert_eq!(args.sort, SearchSortArg::Newest);
                 assert!(args.json);
                 assert_eq!(args.limit, Some(5));
                 assert_eq!(args.since, None);
@@ -1119,6 +1185,14 @@ mod tests {
             "2026-05-24",
             "--latest",
             "1",
+            "--exit-code",
+            "101",
+            "--min-duration",
+            "500ms",
+            "--max-duration",
+            "2s",
+            "--sort",
+            "duration",
         ])
         .unwrap();
 
@@ -1128,6 +1202,10 @@ mod tests {
                 assert_eq!(args.since.as_deref(), Some("2026-05-23T00:00:00Z"));
                 assert_eq!(args.until.as_deref(), Some("2026-05-24"));
                 assert_eq!(args.latest, Some(1));
+                assert_eq!(args.exit_code, Some(101));
+                assert_eq!(args.min_duration.as_deref(), Some("500ms"));
+                assert_eq!(args.max_duration.as_deref(), Some("2s"));
+                assert_eq!(args.sort, SearchSortArg::Duration);
             }
             _ => panic!("expected search command"),
         }
@@ -1147,6 +1225,24 @@ mod tests {
         let result = Cli::try_parse_from(["sivtr", "search", "needle", "--in", "unknown"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn search_rejects_unknown_sort() {
+        let result = Cli::try_parse_from(["sivtr", "search", "terminal", "--sort", "unknown"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn search_target_accepts_line_segment() {
+        let cli =
+            Cli::try_parse_from(["sivtr", "search", "terminal/session_1/3/2", "--json"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Search(args)) => assert_eq!(args.target, "terminal/session_1/3/2"),
+            _ => panic!("expected search command"),
+        }
     }
 
     #[test]

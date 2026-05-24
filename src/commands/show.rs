@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use sivtr_core::ai::AgentProvider;
-use sivtr_core::record::WorkRef;
+use sivtr_core::record::{RecordTextMode, WorkRef};
 
 use crate::cli::ShowArgs;
 use crate::commands::records::current_work_record_index;
@@ -44,13 +44,13 @@ pub fn execute(args: &ShowArgs) -> Result<()> {
 
     let content = match work_ref.line() {
         Some(line) => record
-            .text
-            .combined
+            .copy_text(RecordTextMode::Combined, false)
+            .plain
             .lines()
             .nth(line - 1)
             .with_context(|| format!("No line {line} in ref `{}`", args.reference))?
             .to_string(),
-        None => record.text.combined.clone(),
+        None => record.copy_text(RecordTextMode::Combined, false).plain,
     };
 
     if args.json {
@@ -60,7 +60,7 @@ pub fn execute(args: &ShowArgs) -> Result<()> {
             kind: record.kind_label().to_string(),
             timestamp: record.time.occurred_at.clone(),
             title: ShowJsonTitle {
-                session: record.session.id.clone(),
+                session: record.work_ref.session().to_string(),
                 dialogue: Some(record.title.clone()),
             },
             content,

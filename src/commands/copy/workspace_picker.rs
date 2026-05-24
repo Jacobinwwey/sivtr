@@ -2275,8 +2275,8 @@ mod tests {
     use sivtr_core::ai::AgentProvider;
     use sivtr_core::record::WorkRef;
     use sivtr_core::record::{
-        ChatMessage, WorkChannel, WorkOutcome, WorkPayload, WorkRecord, WorkRecordKind,
-        WorkSessionRef, WorkSource, WorkStatus, WorkText, WorkTime, RECORD_SCHEMA_VERSION,
+        ChatMessage, WorkOutcome, WorkPayload, WorkRecord, WorkRecordKind, WorkStatus, WorkText,
+        WorkTime, RECORD_SCHEMA_VERSION,
     };
     use std::time::SystemTime;
 
@@ -2358,7 +2358,9 @@ mod tests {
         assert_eq!(output.sessions[0].title, "target session");
         assert_eq!(output.sessions[0].records[0].title, "lighting");
         assert_eq!(
-            output.sessions[0].records[0].text.combined,
+            output.sessions[0].records[0]
+                .copy_text(sivtr_core::record::RecordTextMode::Combined, false)
+                .plain,
             "target session:lighting"
         );
         assert_eq!(output.matches.len(), 1);
@@ -2771,27 +2773,18 @@ mod tests {
         plain: &str,
         index: usize,
     ) -> WorkRecord {
-        let (channel, provider) = match source {
-            WorkspaceSource::Terminal => (WorkChannel::Terminal, None),
-            WorkspaceSource::Agent(provider) => {
-                (WorkChannel::Chat, Some(provider.command_name().to_string()))
-            }
-        };
         let work_ref = match source {
             WorkspaceSource::Terminal => WorkRef::terminal_record("test", index + 1),
             WorkspaceSource::Agent(provider) => WorkRef::agent_record(provider, "test", index + 1),
         };
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
-            id: work_ref.to_string(),
-            kind: WorkRecordKind::ChatTurn,
-            source: WorkSource { channel, provider },
-            session: WorkSessionRef {
-                id: "test".to_string(),
-                path: None,
-                index,
-                work_ref,
+            work_ref,
+            kind: match source {
+                WorkspaceSource::Terminal => WorkRecordKind::TerminalCommand,
+                WorkspaceSource::Agent(_) => WorkRecordKind::ChatTurn,
             },
+            session_path: None,
             cwd: None,
             time: WorkTime::default(),
             status: WorkStatus {
@@ -2802,7 +2795,6 @@ mod tests {
             text: WorkText {
                 input: Some(plain.to_string()),
                 output: None,
-                combined: plain.to_string(),
             },
             payload: WorkPayload::ChatTurn {
                 user: plain.to_string(),

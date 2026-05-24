@@ -108,6 +108,19 @@ impl WorkRef {
             Self::Agent { provider, .. } => Some(*provider),
         }
     }
+
+    pub fn session(&self) -> &str {
+        match self {
+            Self::Terminal { session, .. } | Self::Agent { session, .. } => session,
+        }
+    }
+
+    pub fn record_index(&self) -> usize {
+        match self {
+            Self::Terminal { record_index, .. } => *record_index,
+            Self::Agent { turn_index, .. } => *turn_index,
+        }
+    }
 }
 
 impl fmt::Display for WorkRef {

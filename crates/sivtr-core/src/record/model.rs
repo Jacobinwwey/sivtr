@@ -84,33 +84,10 @@ pub enum WorkRecordKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkChannel {
-    Terminal,
-    Chat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum WorkOutcome {
     Success,
     Failure,
     Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct WorkSource {
-    pub channel: WorkChannel,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct WorkSessionRef {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    pub index: usize,
-    pub work_ref: WorkRef,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -136,7 +113,6 @@ pub struct WorkText {
     pub input: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
-    pub combined: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -169,10 +145,10 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkRecord {
     pub schema_version: u32,
-    pub id: String,
+    pub work_ref: WorkRef,
     pub kind: WorkRecordKind,
-    pub source: WorkSource,
-    pub session: WorkSessionRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub time: WorkTime,
@@ -196,7 +172,6 @@ impl WorkRecord {
             .unwrap_or("current")
             .to_string();
         let work_ref = WorkRef::terminal_record(session_id.clone(), index + 1);
-        let ref_id = work_ref.to_string();
         let title = if command.is_empty() {
             preview(&output)
         } else {
@@ -207,22 +182,12 @@ impl WorkRecord {
             Some(_) => WorkOutcome::Failure,
             None => WorkOutcome::Unknown,
         };
-        let combined = join_nonempty([command.as_str(), output.as_str()]);
 
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
-            id: ref_id.clone(),
+            work_ref,
             kind: WorkRecordKind::TerminalCommand,
-            source: WorkSource {
-                channel: WorkChannel::Terminal,
-                provider: None,
-            },
-            session: WorkSessionRef {
-                id: session_id,
-                path: Some(session_path.display().to_string()),
-                index,
-                work_ref,
-            },
+            session_path: Some(session_path.display().to_string()),
             cwd: non_empty(entry.cwd.clone()),
             time: WorkTime {
                 occurred_at: entry.ended_at.clone(),
@@ -237,7 +202,6 @@ impl WorkRecord {
             text: WorkText {
                 input: non_empty(Some(command.clone())),
                 output: non_empty(Some(output.clone())),
-                combined,
             },
             payload: WorkPayload::TerminalCommand {
                 prompt: entry.prompt.clone(),
@@ -301,8 +265,6 @@ impl WorkRecord {
 
         let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
         let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
-        let ref_id = work_ref.to_string();
-        let combined = format_blocks(&chat_blocks);
         let title = if user.trim().is_empty() {
             preview(&assistant)
         } else {
@@ -312,18 +274,9 @@ impl WorkRecord {
 
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
-            id: ref_id.clone(),
+            work_ref,
             kind: WorkRecordKind::ChatTurn,
-            source: WorkSource {
-                channel: WorkChannel::Chat,
-                provider: Some(provider.command_name().to_string()),
-            },
-            session: WorkSessionRef {
-                id: session_ref,
-                path: Some(session.path.display().to_string()),
-                index,
-                work_ref,
-            },
+            session_path: Some(session.path.display().to_string()),
             cwd: non_empty(session.cwd.clone()),
             time: WorkTime {
                 occurred_at: occurred_at.clone(),
@@ -338,7 +291,6 @@ impl WorkRecord {
             text: WorkText {
                 input: non_empty(Some(user.clone())),
                 output: non_empty(Some(assistant.clone())),
-                combined,
             },
             payload: WorkPayload::ChatTurn {
                 user,
@@ -588,7 +540,6 @@ fn selected_block_record(
     let title = preview(&text);
     let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
     let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
-    let ref_id = work_ref.to_string();
     let (input, output) = match kind {
         AgentBlockKind::User => (Some(text.clone()), None),
         AgentBlockKind::Assistant | AgentBlockKind::ToolOutput => (None, Some(text.clone())),
@@ -597,18 +548,9 @@ fn selected_block_record(
 
     WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
-        id: ref_id,
+        work_ref,
         kind: WorkRecordKind::ChatTurn,
-        source: WorkSource {
-            channel: WorkChannel::Chat,
-            provider: Some(provider.command_name().to_string()),
-        },
-        session: WorkSessionRef {
-            id: session_ref,
-            path: Some(session.path.display().to_string()),
-            index,
-            work_ref,
-        },
+        session_path: Some(session.path.display().to_string()),
         cwd: non_empty(session.cwd.clone()),
         time: WorkTime {
             occurred_at: block.timestamp.clone(),
@@ -620,11 +562,7 @@ fn selected_block_record(
             exit_code: None,
         },
         title,
-        text: WorkText {
-            input,
-            output,
-            combined: text.clone(),
-        },
+        text: WorkText { input, output },
         payload: WorkPayload::ChatTurn {
             user: match kind {
                 AgentBlockKind::User => text.clone(),
@@ -656,22 +594,12 @@ fn selected_group_record(
 
     let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
     let work_ref = WorkRef::agent_record(provider, session_ref.clone(), 1);
-    let ref_id = work_ref.to_string();
     let timestamp = first_timestamp(&blocks);
     vec![WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
-        id: ref_id,
+        work_ref,
         kind: WorkRecordKind::ChatTurn,
-        source: WorkSource {
-            channel: WorkChannel::Chat,
-            provider: Some(provider.command_name().to_string()),
-        },
-        session: WorkSessionRef {
-            id: session_ref,
-            path: Some(session.path.display().to_string()),
-            index: 0,
-            work_ref,
-        },
+        session_path: Some(session.path.display().to_string()),
         cwd: non_empty(session.cwd.clone()),
         time: WorkTime {
             occurred_at: timestamp.clone(),
@@ -686,7 +614,6 @@ fn selected_group_record(
         text: WorkText {
             input: None,
             output: Some(combined.clone()),
-            combined: combined.clone(),
         },
         payload: WorkPayload::ChatTurn {
             user: String::new(),
@@ -857,7 +784,6 @@ mod tests {
         let record = WorkRecord::terminal(&entry, Path::new("session_123.log"), 0).unwrap();
 
         assert_eq!(record.kind, WorkRecordKind::TerminalCommand);
-        assert_eq!(record.source.channel, WorkChannel::Terminal);
         assert_eq!(record.cwd.as_deref(), Some("D:\\sivtr"));
         assert_eq!(
             record.time.ended_at.as_deref(),
@@ -908,8 +834,8 @@ mod tests {
         );
         assert_eq!(records[0].text.output, None);
         assert_eq!(
-            records[0].text.combined,
-            "## User\nfix latest terminal error"
+            records[0].copy_text(RecordTextMode::Combined, false).plain,
+            "fix latest terminal error"
         );
         assert_eq!(
             records[0].time.occurred_at.as_deref(),
@@ -950,8 +876,7 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].kind, WorkRecordKind::ChatTurn);
-        assert_eq!(records[0].source.channel, WorkChannel::Chat);
-        assert_eq!(records[0].source.provider.as_deref(), Some("pi"));
+        assert_eq!(records[0].work_ref.provider(), Some(AgentProvider::Pi));
         assert_eq!(records[0].text.input.as_deref(), Some("implement this"));
         assert_eq!(records[0].text.output.as_deref(), Some("done"));
         assert_eq!(

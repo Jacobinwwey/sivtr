@@ -141,32 +141,24 @@ Examples of the mapping:
 Treat `--json` output as structured evidence, not as a free-form transcript.
 
 `sivtr search --json` returns a wrapper with `target`, optional `match`,
-`field`, `cwd`, `match_count`, and `results`. Inspect these result fields first:
+`field`, `cwd`, `count`, and `results`. Inspect these result fields first:
 
 - `ref`: stable reference for follow-up expansion
-- `kind`: `shell` or `ai`
 - `timestamp`: how recent it is
-- `title.session`: session title
-- `title.dialogue`: dialogue or command block title, when available
-- `content`: matched or extracted content
+- `dialogue`: dialogue or command block title
 
 Expected result item shape:
 
 ```json
 {
   "ref": "terminal/current/12/1",
-  "kind": "shell",
   "timestamp": "...",
-  "title": {
-    "session": "current shell",
-    "dialogue": "cargo test"
-  },
-  "content": "cargo test"
+  "dialogue": "cargo test"
 }
 ```
 
-Use `ref` for precise follow-up. Do not infer provider/session identity from
-display text when a `ref` is available.
+Use `ref` for precise follow-up. Search output is intentionally compact; use
+`show` when you need exact content.
 
 ## Expansion Commands
 
