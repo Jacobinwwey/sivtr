@@ -450,9 +450,9 @@ pub enum Commands {
     /// Manage configuration
     Config(ConfigCommand),
 
-    /// Generate shell integration or Linux shortcut helpers
+    /// Generate shell integration or desktop shortcut helpers
     Init {
-        /// Integration target: powershell, bash, zsh, nushell, all, tmux, linux-shortcut
+        /// Integration target: powershell, bash, zsh, nushell, all, tmux, linux-shortcut, macos-shortcut
         #[arg(value_name = "TARGET", allow_hyphen_values = true)]
         target: String,
     },
@@ -912,6 +912,7 @@ pub struct CodexExportArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn copy_input_accepts_prompt_override() {
@@ -1433,6 +1434,29 @@ mod tests {
             Some(Commands::Init { target }) => assert_eq!(target, "linux-shortcut"),
             _ => panic!("expected init command"),
         }
+    }
+
+    #[test]
+    fn init_accepts_macos_shortcut_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "macos-shortcut"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { target }) => assert_eq!(target, "macos-shortcut"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_help_mentions_macos_shortcut_target() {
+        let mut cmd = Cli::command();
+        let init = cmd
+            .find_subcommand_mut("init")
+            .expect("init subcommand should exist");
+        let mut help = Vec::new();
+        init.write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+
+        assert!(help.contains("macos-shortcut"));
     }
 
     #[test]
