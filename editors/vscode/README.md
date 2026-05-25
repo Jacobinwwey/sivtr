@@ -4,7 +4,7 @@ Launch the sivtr AI session picker from VS Code.
 
 ## Usage
 
-Install `sivtr` first:
+Install `sivtr` first. Agent-memory workflows should also install the bundled `sivtr-memory` skill with `npx skills add Ariestar/sivtr --skill sivtr-memory -g`, because the extension only launches the picker; the skill is what teaches agents to query the same local memory.
 
 ```bash
 cargo install sivtr

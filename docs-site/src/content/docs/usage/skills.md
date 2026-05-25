@@ -13,6 +13,10 @@ human work + agent work -> sivtr memory -> skill procedure -> agent action
 
 The key shift is that agents can use `sivtr` as the unified entry point into local workspace memory: logs, errors, prior decisions, and validation results are all available through the same interface.
 
+The bundled `sivtr-memory` skill is part of the recommended setup, not just optional prose. Without the CLI, the skill has nothing to query; without the skill, many agents will not know when to use the CLI before asking you for context.
+
+Install the CLI and skill from [Installation](/start/installation/), then use this page as the operating guide for what the skill does.
+
 ## Why skills matter
 
 Without a skill, an agent may miss useful local evidence.

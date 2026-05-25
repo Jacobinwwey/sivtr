@@ -5,9 +5,9 @@
 <h1 align="center">sivtr</h1>
 
 <p align="center">
-  Terminal output workspace for the AI era.
+  Local workspace memory for humans and agents.
   <br>
-  Capture, sift, browse, search, select, and reuse terminal output and Codex sessions.
+  Capture terminal output and AI sessions with the CLI, then let agents retrieve them through the bundled skill.
 </p>
 
 <p align="center">
@@ -33,22 +33,34 @@
 
 ## What is sivtr?
 
-`sivtr` turns noisy terminal streams into reusable text assets. It is built for developers who move between shells, build logs, test failures, AI-agent replies, tool output, and long Codex sessions.
+`sivtr` is a local-first shared memory workspace for developers and AI agents. It turns noisy terminal streams, build logs, test failures, tool output, and local agent sessions into reusable text assets.
 
-It is not a terminal emulator and not a multiplexer. It is a companion tool for the terminal workflows you already use.
+The full workflow has two cooperating parts that should be installed together:
+
+- **`sivtr` CLI/TUI** captures, browses, searches, copies, and dereferences local workspace memory.
+- **`sivtr-memory` skill** teaches your agent when and how to query that memory before asking you to paste logs or repeat context.
+
+Human-only browsing works with just the CLI. Agent workflows work best when both the CLI and the skill are installed.
+
+`sivtr` is not a terminal emulator and not a multiplexer. It is a memory layer beside the terminal and agent tools you already use.
 
 ## Highlights
 
 - Browse command output in a fast keyboard-first TUI.
 - Pipe any command into a searchable, selectable output viewer.
 - Record shell command blocks and copy recent inputs, outputs, or bare commands.
-- Read Codex session JSONL files and copy useful user, assistant, or tool blocks.
+- Read local AI-agent session files and copy useful user, assistant, or tool blocks.
+- Install the bundled `sivtr-memory` skill so agents can search local evidence first.
 - Open an AI session picker from VS Code with one shortcut.
 - Filter copied text with regex and line ranges.
 - Keep a local SQLite history for later search.
 - Compare recent command outputs while iterating on tests and builds.
 
-## Install
+## Install CLI and skill
+
+For the full workflow, install both the `sivtr` CLI and the bundled `sivtr-memory` skill. The CLI stores and retrieves local memory; the skill tells your agent how to use that memory.
+
+### 1. Install the CLI
 
 Install the CLI from crates.io:
 
@@ -56,13 +68,23 @@ Install the CLI from crates.io:
 cargo install sivtr
 ```
 
-Install from source:
+Or install from source:
 
 ```bash
 git clone https://github.com/Ariestar/sivtr.git
 cd sivtr
 cargo install --path .
 ```
+
+### 2. Install the bundled skill
+
+Install the `sivtr-memory` skill globally with the Skills CLI:
+
+```bash
+npx skills add Ariestar/sivtr --skill sivtr-memory -g
+```
+
+### 3. Optional: install the VS Code bridge
 
 Install the VS Code bridge from the Marketplace:
 

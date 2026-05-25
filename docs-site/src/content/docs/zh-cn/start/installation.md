@@ -1,9 +1,16 @@
 ---
 title: 安装
-description: 使用 Cargo 安装 sivtr，并设置 shell 集成。
+description: 安装 sivtr CLI、内置 memory skill，并设置 shell 集成。
 ---
 
 `sivtr` 以 Cargo 包发布，源码位于 [github.com/Ariestar/sivtr](https://github.com/Ariestar/sivtr)。
+
+完整的人 + Agent 工作流需要安装两部分：
+
+- **CLI/TUI**：负责捕获和取回本地 workspace memory；
+- 内置 **`sivtr-memory` skill**：负责教 Agent 怎么使用这些记忆。
+
+只给人浏览时，单独安装 CLI 也可以；要让 Agent 复用本地上下文，建议两个都装。
 
 ## 要求
 
@@ -44,6 +51,20 @@ cd sivtr
 
 ```bash
 cargo install --path .
+```
+
+## 安装内置 skill
+
+用 Skills CLI 全局安装 `sivtr-memory` skill：
+
+```bash
+npx skills add Ariestar/sivtr --skill sivtr-memory -g
+```
+
+安装后，当本地上下文可能已经存在时，可以要求 Agent 先用 sivtr：
+
+```text
+解决最近的终端报错，先用 sivtr 查。
 ```
 
 ## 更新

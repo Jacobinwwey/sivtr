@@ -7,6 +7,8 @@ description: 面向人和 Agent 的 shared memory workspace。
 
 它放在你已有的终端和 Agent 旁边，为这些本地工作提供一个共享记忆工作区。
 
+完整工作流需要同时安装 `sivtr` CLI/TUI 和内置 `sivtr-memory` skill。CLI 负责捕获和取回记忆；skill 负责教 Agent 在让你粘贴上下文之前，先主动查询这些记忆。
+
 ## sivtr 不是什么
 
 `sivtr` 不是：
@@ -53,7 +55,7 @@ sivtr search agent --match "panic" --format timeline
 
 | 目标 | 从这里开始 |
 | --- | --- |
-| 安装 CLI | [安装](/zh-cn/start/installation/) |
+| 安装 CLI + skill | [安装](/zh-cn/start/installation/) |
 | 走一遍日常路径 | [快速开始](/zh-cn/start/quickstart/) |
 | 理解模型 | [心智模型](/zh-cn/start/core-concepts/) |
 | 捕获输出 | [捕获终端输出](/zh-cn/usage/capture-output/) |

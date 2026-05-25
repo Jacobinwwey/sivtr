@@ -5,9 +5,9 @@
 <h1 align="center">sivtr</h1>
 
 <p align="center">
-  面向 AI 编程时代的终端输出工作台。
+  面向人和 AI Agent 的本地工作记忆层。
   <br>
-  捕获、筛选、浏览、搜索、选择并复用终端输出和 Codex 会话。
+  CLI 负责捕获终端输出和 Agent 会话，skill 负责教 Agent 主动检索这些记忆。
 </p>
 
 <p align="center">
@@ -33,22 +33,34 @@
 
 ## sivtr 是什么？
 
-`sivtr` 是一个面向 AI 编程时代的终端输出工作台。它把命令输出、测试失败、构建日志、Codex 会话、工具调用结果变成可以搜索、选择、复制、复用的文本资产。
+`sivtr` 是一个本地优先的 shared memory workspace，服务于开发者和 AI Agent。它把命令输出、测试失败、构建日志、Agent 会话和工具调用结果变成可以搜索、选择、复制、复用的文本资产。
 
-它不是终端模拟器，也不是 tmux 这类复用器。它更像是你现有终端工作流旁边的“输出处理层”。
+完整工作流由两个部分配合完成，建议一起安装：
+
+- **`sivtr` CLI/TUI**：负责捕获、浏览、搜索、复制和按 ref 取回本地工作记忆。
+- **`sivtr-memory` skill**：教你的 Agent 什么时候、怎么查询这些记忆，避免一上来就让你重新粘贴日志或复述上下文。
+
+只给人浏览时，单独安装 CLI 也可以；想让 Agent 真正复用本地记忆时，CLI 和 skill 都需要安装。
+
+它不是终端模拟器，也不是 tmux 这类复用器。它是你现有终端和 Agent 工具旁边的一层“工作记忆”。
 
 ## 特性
 
 - 用键盘优先的 TUI 浏览命令输出。
 - 把任意命令输出通过管道送入可搜索、可选择的浏览器。
 - 记录 shell 命令块，之后复制最近的输入、输出或纯命令。
-- 读取 Codex 的 JSONL 会话文件，复制用户消息、助手回复或工具输出。
+- 读取本地 AI Agent 会话文件，复制用户消息、助手回复或工具输出。
+- 安装内置 `sivtr-memory` skill，让 Agent 先搜索本地证据再行动。
 - 在 VS Code 中用一个快捷键打开 AI session picker。
 - 支持用正则和行号范围过滤复制内容。
 - 用本地 SQLite 保存历史，之后可以检索。
 - 迭代测试和构建时，对比最近几次命令输出。
 
-## 安装
+## 安装 CLI 和 skill
+
+完整工作流需要同时安装 `sivtr` CLI 和内置的 `sivtr-memory` skill。CLI 负责存取本地记忆；skill 负责告诉 Agent 怎么使用这些记忆。
+
+### 1. 安装 CLI
 
 从 crates.io 安装 CLI：
 
@@ -56,13 +68,23 @@
 cargo install sivtr
 ```
 
-从源码安装：
+或从源码安装：
 
 ```bash
 git clone https://github.com/Ariestar/sivtr.git
 cd sivtr
 cargo install --path .
 ```
+
+### 2. 安装内置 skill
+
+用 Skills CLI 全局安装 `sivtr-memory` skill：
+
+```bash
+npx skills add Ariestar/sivtr --skill sivtr-memory -g
+```
+
+### 3. 可选：安装 VS Code 插件
 
 VS Code 插件：
 

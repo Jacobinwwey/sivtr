@@ -1,9 +1,16 @@
 ---
 title: Installation
-description: Install sivtr with Cargo and set up shell integration.
+description: Install the sivtr CLI, bundled memory skill, and shell integration.
 ---
 
 `sivtr` is published as a Cargo package and developed at [github.com/Ariestar/sivtr](https://github.com/Ariestar/sivtr).
+
+For the full human + agent workflow, install two pieces:
+
+- the **CLI/TUI**, which captures and retrieves local workspace memory;
+- the bundled **`sivtr-memory` skill**, which teaches your agent how to use that memory.
+
+Human-only browsing can work with just the CLI. Agent workflows should install both.
 
 ## Requirements
 
@@ -44,6 +51,20 @@ From the repository root:
 
 ```bash
 cargo install --path .
+```
+
+## Install the bundled skill
+
+Install the `sivtr-memory` skill globally with the Skills CLI:
+
+```bash
+npx skills add Ariestar/sivtr --skill sivtr-memory -g
+```
+
+After installation, ask your agent to use sivtr first when local context may already exist, for example:
+
+```text
+Fix the latest terminal error. Use sivtr first.
 ```
 
 ## Update

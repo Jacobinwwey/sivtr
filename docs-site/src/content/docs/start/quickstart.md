@@ -6,9 +6,18 @@ description: Open the unified workspace TUI, browse terminal commands and all ag
 `sivtr` has two everyday paths:
 
 - **For humans:** open the `sivtr` TUI panel to browse terminal output and agent sessions together, search across sources, and copy the exact part you need.
-- **For agents:** use CLI commands such as `sivtr search`, `sivtr copy --print`, and `sivtr show` to retrieve local workspace memory.
+- **For agents:** install the bundled `sivtr-memory` skill, then use CLI commands such as `sivtr search`, `sivtr copy --print`, and `sivtr show` to retrieve local workspace memory.
 
-## 1. Put terminal history into the workspace
+## 1. Install the CLI and skill
+
+Follow [Installation](/start/installation/) first. The important point is that agent workflows need both parts:
+
+- the `sivtr` CLI must be on `PATH`;
+- the bundled `sivtr-memory` skill must be installed with `npx skills add Ariestar/sivtr --skill sivtr-memory -g`.
+
+After that, the agent can be told to "use sivtr first" and will have a concrete procedure for searching local memory.
+
+## 2. Put terminal history into the workspace
 
 If this is your first time using `sivtr`, install shell integration once:
 
@@ -29,7 +38,7 @@ git status --short
 
 Recent commands and output will now appear in the workspace. Agent sessions (Claude, Codex, OpenCode, Pi) are read from their local session directories.
 
-## 2. Open the unified workspace TUI
+## 3. Open the unified workspace TUI
 
 Run:
 
@@ -76,7 +85,7 @@ Workspace search supports prefixes:
 | `#build` | Dialogue or command-block title |
 | `>release` | Session title |
 
-## 3. Open only one kind of content
+## 4. Open only one kind of content
 
 The unified workspace is the default entry point. When you only want one source, use a more specific picker.
 
@@ -97,7 +106,7 @@ sivtr copy pi --pick
 
 These are filtered workspace views, not the main entry point.
 
-## 4. Copy directly when you know what you need
+## 5. Copy directly when you know what you need
 
 When you already know what to fetch, you do not need to open the TUI:
 
@@ -120,7 +129,7 @@ sivtr copy pi out --print
 
 For agent use, prefer `--print` so the command returns text instead of opening an interactive UI or only writing to the clipboard.
 
-## 5. Let the agent search workspace memory first
+## 6. Let the agent search workspace memory first
 
 When something fails, tell the agent:
 
@@ -141,7 +150,7 @@ Then it can read code, patch the issue, and rerun the smallest relevant verifica
 
 This is the core value: what you can see in the unified workspace, the agent can also read through commands.
 
-## 6. Return to exact evidence with refs
+## 7. Return to exact evidence with refs
 
 Search results include refs. A ref can point to a terminal command block, an agent session, a dialogue, or a specific content block.
 
@@ -154,7 +163,7 @@ sivtr show claude/<session>/3/2
 
 Refs let humans and agents return to the same evidence instead of relying on vague summaries.
 
-## 7. Use the single-output browser when needed
+## 8. Use the single-output browser when needed
 
 Besides the workspace TUI, `sivtr` also has a single-buffer browser for temporary long output:
 

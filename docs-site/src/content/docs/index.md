@@ -7,6 +7,8 @@ description: A shared memory workspace for humans and agents.
 
 Use it beside the terminals and agents you already have. It gives their local work one shared memory workspace.
 
+For the full workflow, install both pieces: the `sivtr` CLI/TUI and the bundled `sivtr-memory` skill. The CLI captures and retrieves memory; the skill teaches agents to use that memory before asking you to paste context.
+
 ## What sivtr is not
 
 `sivtr` is not:
@@ -53,7 +55,7 @@ sivtr search agent --match "panic" --format timeline
 
 | Goal | Start here |
 | --- | --- |
-| Install the CLI | [Installation](/start/installation/) |
+| Install the CLI + skill | [Installation](/start/installation/) |
 | Learn the daily path | [Quickstart](/start/quickstart/) |
 | Understand the model | [Mental Model](/start/core-concepts/) |
 | Capture output | [Capture Terminal Output](/usage/capture-output/) |
