@@ -433,9 +433,14 @@ Filters:
   --refs                Alias for --format refs
   --format <format>    Output format: timeline, compact, md, refs, or json
 
+Pipelines:
+  If stdin is piped into `sivtr search`, each non-empty input line is treated as a record ref filter.
+  Use `--refs` in an earlier search to chain filters across fields.
+
 Examples:
   sivtr search terminal --status failure --latest 1 --json
   sivtr search terminal --match "panic|failed" --exclude "example|sample" --latest 20 --refs
+  sivtr search terminal --match "panic|failed" --in content --refs | sivtr search terminal --exclude "demo" --in title --format timeline
   sivtr search pi --match "merge|conflict" --latest 20 --format timeline
   sivtr search pi/019e5941 --match "cargo test" --format md
   sivtr search pi/019e5941/7 --format json

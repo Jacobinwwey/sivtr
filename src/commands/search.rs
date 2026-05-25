@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -111,6 +112,7 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         .as_deref()
         .map(|query| Regex::new(&format!("(?i){query}")))
         .transpose()?;
+    let piped_refs = read_piped_record_refs()?;
     let min_duration_ms = parse_duration_ms_filter(args.min_duration.as_deref(), "--min-duration")?;
     let max_duration_ms = parse_duration_ms_filter(args.max_duration.as_deref(), "--max-duration")?;
     if let (Some(min), Some(max)) = (min_duration_ms, max_duration_ms) {
@@ -123,6 +125,9 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         .iter()
         .filter(|record| {
             target.matches(record)
+                && piped_refs
+                    .as_ref()
+                    .is_none_or(|refs| refs.contains(&record.work_ref.record_ref().to_string()))
                 && !excluded_session_matches(record, &excluded_sessions)
                 && status_matches(args.status, record.status.outcome)
                 && exit_code_matches(args.exit_code, record.status.exit_code)
@@ -174,6 +179,42 @@ fn search_format(args: &SearchArgs) -> SearchOutputFormatArg {
     } else {
         args.format
     }
+}
+
+fn read_piped_record_refs() -> Result<Option<HashSet<String>>> {
+    if atty::is(atty::Stream::Stdin) {
+        return Ok(None);
+    }
+
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .context("Failed to read piped search refs from stdin")?;
+    let refs = input
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(record_ref_from_input)
+        .collect::<HashSet<_>>();
+
+    if refs.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(refs))
+    }
+}
+
+fn record_ref_from_input(input: &str) -> String {
+    let parts = input.split('/').collect::<Vec<_>>();
+    if parts.first().is_some_and(|source| *source == "terminal") && parts.len() >= 3 {
+        return parts[..3].join("/");
+    }
+    if AgentProvider::from_command_name(parts.first().copied().unwrap_or_default()).is_some()
+        && parts.len() >= 3
+    {
+        return parts[..3].join("/");
+    }
+    input.to_string()
 }
 
 impl SearchTarget {
@@ -955,6 +996,17 @@ mod tests {
 
         assert_eq!(group.ref_, "terminal/session_1/3");
         assert_eq!(group.matches[0].ref_, "terminal/session_1/3/2");
+    }
+
+    #[test]
+    fn record_ref_from_input_accepts_record_and_line_refs() {
+        assert_eq!(
+            record_ref_from_input("terminal/session_1/3/2"),
+            "terminal/session_1/3"
+        );
+        assert_eq!(record_ref_from_input("pi/019e5941/7/12"), "pi/019e5941/7");
+        assert_eq!(record_ref_from_input("pi/019e5941/7"), "pi/019e5941/7");
+        assert_eq!(record_ref_from_input("not-a-ref"), "not-a-ref");
     }
 
     #[test]

@@ -234,6 +234,8 @@ Options:
 | `--refs` | Alias for `--format refs`; prints record refs, one per line |
 | `--format <FORMAT>` | `timeline`, `compact`, `md`, `refs`, or `json`; default is `json` |
 
+When stdin is piped into `sivtr search`, each non-empty input line is treated as a record ref filter. This lets searches chain naturally: output refs from one search, then filter those records in the next search.
+
 Time filters accept RFC3339 timestamps, Unix seconds/milliseconds, relative durations like `30m`, `2h`, `7d`, and aliases such as `today`, `yesterday`, `tomorrow`, `this morning`, `this afternoon`, `this evening`, `tonight`, and `now`.
 
 Examples:
@@ -241,6 +243,7 @@ Examples:
 ```bash
 sivtr search terminal --status failure --latest 1 --json
 sivtr search terminal --match "panic|failed" --exclude "example|sample" --since today --refs
+sivtr search terminal --match "panic|failed" --in content --refs | sivtr search terminal --exclude "demo" --in title --format timeline
 sivtr search agent --match "TODO|failed|next step" --since yesterday --format md
 sivtr search pi --since today --sort oldest --format timeline
 sivtr search pi/019e5941 --match "cargo test" --format compact
