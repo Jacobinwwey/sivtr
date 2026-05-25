@@ -399,3 +399,11 @@ sivtr/
 ## License
 
 sivtr is licensed under the [Apache License 2.0](LICENSE).
+
+## Developer Community
+
+If sivtr helps your workflow, please consider giving the repo a star. Issues for bugs, ideas, and feedback are welcome, and PRs are warmly encouraged.
+
+You're also very welcome to join the developer QQ group to discuss usage, share workflows, and help shape the project together.
+
+QQ group: 1098661254
