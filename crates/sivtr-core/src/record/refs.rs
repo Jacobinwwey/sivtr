@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::fmt;
 use std::str::FromStr;
@@ -9,6 +9,87 @@ use crate::ai::AgentProvider;
 pub enum WorkRefTarget {
     Record,
     Line(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkRefSelector {
+    Terminal {
+        session: Option<String>,
+        records: Option<Vec<usize>>,
+        lines: Option<Vec<usize>>,
+    },
+    Agent {
+        provider: Option<AgentProvider>,
+        session: Option<String>,
+        records: Option<Vec<usize>>,
+        lines: Option<Vec<usize>>,
+    },
+}
+
+impl WorkRefSelector {
+    pub fn providers(&self) -> Vec<AgentProvider> {
+        match self {
+            Self::Terminal { .. } => Vec::new(),
+            Self::Agent {
+                provider: Some(provider),
+                ..
+            } => vec![*provider],
+            Self::Agent { provider: None, .. } => AgentProvider::all()
+                .iter()
+                .map(|spec| spec.provider)
+                .collect(),
+        }
+    }
+
+    pub fn matches_work_ref(&self, reference: &WorkRef) -> bool {
+        let (session, records) = match (self, reference) {
+            (
+                Self::Terminal {
+                    session, records, ..
+                },
+                WorkRef::Terminal { .. },
+            ) => (session, records),
+            (
+                Self::Agent {
+                    provider: None,
+                    session,
+                    records,
+                    ..
+                },
+                WorkRef::Agent { .. },
+            ) => (session, records),
+            (
+                Self::Agent {
+                    provider: Some(expected),
+                    session,
+                    records,
+                    ..
+                },
+                WorkRef::Agent { provider, .. },
+            ) if expected == provider => (session, records),
+            _ => return false,
+        };
+
+        if let Some(expected) = session.as_deref() {
+            if !segment_matches(expected, reference.session()) {
+                return false;
+            }
+        }
+
+        if let Some(records) = records {
+            if !records.contains(&reference.record_index()) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn selected_lines(&self) -> Option<&[usize]> {
+        match self {
+            Self::Terminal { lines, .. } | Self::Agent { lines, .. } => lines.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,7 +247,7 @@ impl Serialize for WorkRef {
     }
 }
 
-impl FromStr for WorkRef {
+impl FromStr for WorkRefSelector {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self> {
@@ -174,48 +255,153 @@ impl FromStr for WorkRef {
             .split('/')
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>();
-        if !(3..=4).contains(&parts.len()) {
-            bail!("Invalid work ref `{value}`; expected terminal/<session>/<record>[/line] or <provider>/<session>/<turn>[/line]");
+        if parts.is_empty() || parts.len() > 4 {
+            bail!("Invalid work ref selector `{value}`; expected terminal[/<session>[/<record>[/line]]], agent[/<session>[/<turn>[/line]]], or <provider>[/<session>[/<turn>[/line]]]");
         }
 
-        let target = if parts.len() == 4 {
-            WorkRefTarget::Line(parse_one_based(parts[3], "line", value)?)
+        let session = parts
+            .get(1)
+            .filter(|part| **part != "*")
+            .map(|part| (*part).to_string());
+        let records = parts
+            .get(2)
+            .filter(|part| **part != "*")
+            .map(|part| parse_index_selector(part, "record", value))
+            .transpose()?;
+        let lines = parts
+            .get(3)
+            .filter(|part| **part != "*")
+            .map(|part| parse_index_selector(part, "line", value))
+            .transpose()?;
+
+        let selector = if parts[0].eq_ignore_ascii_case("terminal") {
+            WorkRefSelector::Terminal {
+                session,
+                records,
+                lines,
+            }
+        } else if parts[0].eq_ignore_ascii_case("agent") {
+            WorkRefSelector::Agent {
+                provider: None,
+                session,
+                records,
+                lines,
+            }
+        } else if let Some(provider) = AgentProvider::from_command_name(parts[0]) {
+            WorkRefSelector::Agent {
+                provider: Some(provider),
+                session,
+                records,
+                lines,
+            }
         } else {
-            WorkRefTarget::Record
-        };
-        let item_index = parse_one_based(parts[2], "record", value)?;
-
-        if parts[0].eq_ignore_ascii_case("terminal") {
-            return Ok(Self::Terminal {
-                session: parts[1].to_string(),
-                record_index: item_index,
-                target,
-            });
-        }
-
-        let provider = AgentProvider::from_command_name(parts[0]).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid work ref `{value}`; unknown provider `{}`",
+            bail!(
+                "Invalid work ref selector `{value}`; unknown source `{}`",
                 parts[0]
-            )
-        })?;
-        Ok(Self::Agent {
-            provider,
-            session: parts[1].to_string(),
-            turn_index: item_index,
-            target,
-        })
+            );
+        };
+
+        Ok(selector)
     }
 }
 
+impl FromStr for WorkRef {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        let selector: WorkRefSelector = value.parse()?;
+        match selector {
+            WorkRefSelector::Terminal {
+                session,
+                records,
+                lines,
+            } => Ok(Self::Terminal {
+                session: required_session(session, value)?,
+                record_index: single_index(records.as_deref(), "record", value)?,
+                target: target_from_lines(lines.as_deref(), value)?,
+            }),
+            WorkRefSelector::Agent {
+                provider: Some(provider),
+                session,
+                records,
+                lines,
+            } => Ok(Self::Agent {
+                provider,
+                session: required_session(session, value)?,
+                turn_index: single_index(records.as_deref(), "record", value)?,
+                target: target_from_lines(lines.as_deref(), value)?,
+            }),
+            WorkRefSelector::Agent { provider: None, .. } => {
+                bail!("Invalid work ref `{value}`; provider-specific source is required")
+            }
+        }
+    }
+}
+
+fn required_session(session: Option<String>, reference: &str) -> Result<String> {
+    session.ok_or_else(|| anyhow::anyhow!("Invalid work ref `{reference}`; session is required"))
+}
+
+fn target_from_lines(lines: Option<&[usize]>, reference: &str) -> Result<WorkRefTarget> {
+    match lines {
+        Some(lines) => Ok(WorkRefTarget::Line(single_index(
+            Some(lines),
+            "line",
+            reference,
+        )?)),
+        None => Ok(WorkRefTarget::Record),
+    }
+}
+
+fn single_index(indices: Option<&[usize]>, label: &str, reference: &str) -> Result<usize> {
+    match indices {
+        Some([index]) => Ok(*index),
+        Some(_) => {
+            bail!("Invalid work ref `{reference}`; {label} selector must resolve to one index")
+        }
+        None => bail!("Invalid work ref `{reference}`; {label} index is required"),
+    }
+}
+
+fn parse_index_selector(part: &str, label: &str, reference: &str) -> Result<Vec<usize>> {
+    let mut indices = Vec::new();
+    for raw_token in part.split(',') {
+        let token = raw_token.trim();
+        if token.is_empty() {
+            bail!("Invalid work ref selector `{reference}`; empty {label} selector segment");
+        }
+
+        if let Some((start, end)) = token.split_once('-') {
+            let start = parse_one_based(start, label, reference)?;
+            let end = parse_one_based(end, label, reference)?;
+            if start > end {
+                bail!(
+                    "Invalid work ref selector `{reference}`; {label} range start must be <= end"
+                );
+            }
+            indices.extend(start..=end);
+        } else {
+            indices.push(parse_one_based(token, label, reference)?);
+        }
+    }
+
+    indices.sort_unstable();
+    indices.dedup();
+    Ok(indices)
+}
+
 fn parse_one_based(part: &str, label: &str, reference: &str) -> Result<usize> {
-    let value = part.parse::<usize>().map_err(|_| {
-        anyhow::anyhow!("Invalid work ref `{reference}`; {label} index must be a positive integer")
+    let value = part.parse::<usize>().with_context(|| {
+        format!("Invalid work ref selector `{reference}`; {label} index must be a positive integer")
     })?;
     if value == 0 {
-        bail!("Invalid work ref `{reference}`; {label} index must be 1-based");
+        bail!("Invalid work ref selector `{reference}`; {label} index must be 1-based");
     }
     Ok(value)
+}
+
+fn segment_matches(expected: &str, actual: &str) -> bool {
+    actual == expected || actual.starts_with(expected)
 }
 
 #[cfg(test)]
@@ -256,5 +442,29 @@ mod tests {
     fn rejects_zero_indices() {
         assert!("pi/session/0".parse::<WorkRef>().is_err());
         assert!("pi/session/1/0".parse::<WorkRef>().is_err());
+    }
+
+    #[test]
+    fn parses_ref_selectors() {
+        assert_eq!(
+            "pi/abcdef12/2-4,7/*".parse::<WorkRefSelector>().unwrap(),
+            WorkRefSelector::Agent {
+                provider: Some(AgentProvider::Pi),
+                session: Some("abcdef12".to_string()),
+                records: Some(vec![2, 3, 4, 7]),
+                lines: None,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_multi_index_concrete_refs() {
+        assert!("pi/session/1-2".parse::<WorkRef>().is_err());
+        assert!("agent/session/1".parse::<WorkRef>().is_err());
+    }
+
+    #[test]
+    fn rejects_descending_ranges() {
+        assert!("pi/session/5-3".parse::<WorkRefSelector>().is_err());
     }
 }

@@ -38,7 +38,11 @@ Target 可以继续缩小到 session、record/turn 和 line：
 ```bash
 sivtr search pi/019e5941 --match "cargo test"
 sivtr search terminal/session_13104/3/12 --format json
+sivtr search pi/019e5941/3-5,7 --match "cargo test"
+sivtr search pi/019e5941/3/5-7,10 --format json
 ```
+
+record/turn 和 line segment 都是 1-based，支持 `3`、`3-5`、`3,7` 或 `3-5,7`。`*` 表示 wildcard segment。Search selector 只用于缩小输入范围；search 输出仍然返回具体 ref。
 
 使用 `agent` 搜索所有受支持 AI provider，或使用 provider 名只搜一个 provider。
 
@@ -113,11 +117,13 @@ sivtr search agent --since today --format json
 
 ## 展示 ref
 
-Ref 形状如下：
+Ref/selector 形状如下：
 
 ```text
 source/session[/record-or-turn[/line]]
 ```
+
+具体 ref 指向单个 record 或单行。作为命令输入时，record/turn 和 line segment 也可以是 `3-5,7` 这样的 selector；输出 ref 仍然是具体锚点。
 
 打印一个 record 或 turn：
 
@@ -131,6 +137,13 @@ sivtr show terminal/<session>/<record>
 ```bash
 sivtr show claude/<session>/<turn>/<line>
 sivtr show terminal/<session>/<record>/<line>
+```
+
+用 selector 语法打印多个 record 或 line：
+
+```bash
+sivtr show pi/<session>/3-5,7
+sivtr show pi/<session>/3/5-7,10
 ```
 
 机器可读输出使用 JSON：

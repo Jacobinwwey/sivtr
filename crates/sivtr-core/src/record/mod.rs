@@ -8,4 +8,4 @@ pub use model::{
     WorkPayload, WorkRecord, WorkRecordCopyParts, WorkRecordKind, WorkStatus, WorkText, WorkTime,
     RECORD_SCHEMA_VERSION,
 };
-pub use refs::{WorkRef, WorkRefTarget};
+pub use refs::{WorkRef, WorkRefSelector, WorkRefTarget};

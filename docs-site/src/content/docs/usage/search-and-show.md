@@ -38,7 +38,11 @@ Targets can narrow to a session, record/turn, and line:
 ```bash
 sivtr search pi/019e5941 --match "cargo test"
 sivtr search terminal/session_13104/3/12 --format json
+sivtr search pi/019e5941/3-5,7 --match "cargo test"
+sivtr search pi/019e5941/3/5-7,10 --format json
 ```
+
+Record/turn and line segments are 1-based and accept `3`, `3-5`, `3,7`, or `3-5,7`. Use `*` as a wildcard segment. Search selectors narrow the input scope; search output still returns concrete refs.
 
 Use `agent` for every supported AI provider, or a provider name for one provider.
 
@@ -113,11 +117,13 @@ The default is `json` so scripts get a stable shape when no format is specified.
 
 ## Show a ref
 
-Refs have this shape:
+Refs/selectors have this shape:
 
 ```text
 source/session[/record-or-turn[/line]]
 ```
+
+A concrete ref points at one record or one line. As command input, the record/turn and line segments can also be selectors such as `3-5,7`; output refs remain concrete anchors.
 
 Print a record or turn:
 
@@ -131,6 +137,13 @@ Print one 1-based line:
 ```bash
 sivtr show claude/<session>/<turn>/<line>
 sivtr show terminal/<session>/<record>/<line>
+```
+
+Print multiple records or lines with selector syntax:
+
+```bash
+sivtr show pi/<session>/3-5,7
+sivtr show pi/<session>/3/5-7,10
 ```
 
 Use JSON for machine-readable output:

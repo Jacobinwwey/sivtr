@@ -37,6 +37,9 @@ Targets:
 - `codex`, `claude`, `pi`, `opencode`: one provider's conversation records.
 - `terminal/<session>/<record>/<line>` or `<provider>/<session>/<turn>/<line>`:
   ref-like narrowing. Trailing segments are optional. `*` means wildcard.
+- Record and line segments accept 1-based selectors: `3`, `3-5`, `3,7`, or
+  `3-5,7`. Use these selectors to narrow search scope; search results still
+  return concrete refs such as `pi/<session>/3/12`.
 
 Filters:
 
@@ -208,18 +211,24 @@ sivtr show "<ref>" --json
 sivtr show "terminal/current/12/8" --json
 ```
 
-Refs have this shape:
+Refs/selectors have this shape:
 
 ```text
 terminal/session/dialogue[/line]
 provider/session/dialogue[/line]
 ```
 
+The `dialogue`/`line` segments may be concrete numbers or selector lists/ranges
+when used as command input, for example `3-5,7` or `5-7,10`. Output refs remain
+concrete anchors.
+
 Examples:
 
 ```bash
 sivtr show "terminal/current/12" --json
 sivtr show "pi/019e4f40/3" --json
+sivtr show "pi/019e4f40/3-5,7" --json
+sivtr show "pi/019e4f40/3/5-7,10" --json
 ```
 
 ## Token Budget
