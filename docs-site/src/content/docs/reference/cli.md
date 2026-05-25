@@ -215,9 +215,9 @@ Options:
 
 | Option | Meaning |
 | --- | --- |
-| `--match <REGEX>` | Case-insensitive content filter |
-| `--exclude <REGEX>` | Case-insensitive exclusion filter applied after matches are found |
-| `--in <FIELD>` | `content`, `title`, `session`, `input`, `output`, `command`, or `all`; default is `content` |
+| `--match <REGEX>`, `-m <REGEX>` | Case-insensitive content filter |
+| `--exclude <REGEX>`, `-v <REGEX>` | Case-insensitive exclusion filter applied after matches are found |
+| `--in <FIELD>`, `-i <FIELD>` | `content`, `title`, `session`, `input`, `output`, `command`, or `all`; default is `content` |
 | `--status <STATUS>` | `success`, `failure`, or `unknown` |
 | `--exit-code <CODE>` | Exact terminal process exit code |
 | `--min-duration <DURATION>` | Minimum command duration, e.g. `500ms`, `2s`, `1m` |
@@ -232,7 +232,7 @@ Options:
 | `--exclude-current`, `--other` | Exclude the current agent session from agent searches |
 | `--json` | Alias for `--format json` |
 | `--refs` | Alias for `--format refs`; prints record refs, one per line |
-| `--format <FORMAT>` | `timeline`, `compact`, `md`, `refs`, or `json`; default is `json` |
+| `--format <FORMAT>`, `-f <FORMAT>` | `timeline`, `compact`, `md`, `refs`, or `json`; default is `json` |
 
 When stdin is piped into `sivtr search`, each non-empty input line is treated as a record ref filter. This lets searches chain naturally: output refs from one search, then filter those records in the next search.
 
@@ -242,8 +242,8 @@ Examples:
 
 ```bash
 sivtr search terminal --status failure --latest 1 --json
-sivtr search terminal --match "panic|failed" --exclude "example|sample" --since today --refs
-sivtr search terminal --match "panic|failed" --in content --refs | sivtr search terminal --exclude "demo" --in title --format timeline
+sivtr s terminal -m "panic|failed" -v "example|sample" --since today --refs
+sivtr s terminal -m "panic|failed" -i content --refs | sivtr s terminal -v "demo" -i title -f timeline
 sivtr search agent --match "TODO|failed|next step" --since yesterday --format md
 sivtr search pi --since today --sort oldest --format timeline
 sivtr search pi/019e5941 --match "cargo test" --format compact

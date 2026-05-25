@@ -439,8 +439,8 @@ Pipelines:
 
 Examples:
   sivtr search terminal --status failure --latest 1 --json
-  sivtr search terminal --match "panic|failed" --exclude "example|sample" --latest 20 --refs
-  sivtr search terminal --match "panic|failed" --in content --refs | sivtr search terminal --exclude "demo" --in title --format timeline
+  sivtr s terminal --status fail -m "panic|failed" -v "example|sample" --latest 20 --refs
+  sivtr s terminal -m "panic|failed" -i content --refs | sivtr s terminal -v "demo" -i title -f timeline
   sivtr search pi --match "merge|conflict" --latest 20 --format timeline
   sivtr search pi/019e5941 --match "cargo test" --format md
   sivtr search pi/019e5941/7 --format json
@@ -490,7 +490,7 @@ pub enum Commands {
     History(HistoryCommand),
 
     /// Search captured terminal and AI workspace sessions
-    #[command(after_help = SEARCH_AFTER_HELP)]
+    #[command(visible_alias = "s", after_help = SEARCH_AFTER_HELP)]
     Search(SearchArgs),
 
     /// Show a captured terminal or AI workspace ref
@@ -694,15 +694,15 @@ pub struct SearchArgs {
     pub target: String,
 
     /// Case-insensitive regex content filter
-    #[arg(long = "match", value_name = "REGEX")]
+    #[arg(short = 'm', long = "match", value_name = "REGEX")]
     pub match_: Option<String>,
 
     /// Case-insensitive regex exclusion filter
-    #[arg(long, value_name = "REGEX")]
+    #[arg(short = 'v', long, value_name = "REGEX")]
     pub exclude: Option<String>,
 
     /// Field to match: content, title, session, input, output, command, or all
-    #[arg(long = "in", default_value_t = SearchFieldArg::default(), value_name = "FIELD")]
+    #[arg(short = 'i', long = "in", default_value_t = SearchFieldArg::default(), value_name = "FIELD")]
     pub in_field: SearchFieldArg,
 
     /// Record status filter: success, failure, or unknown
@@ -754,7 +754,7 @@ pub struct SearchArgs {
     pub exclude_current: bool,
 
     /// Output format: timeline, compact, md, refs, or json
-    #[arg(long, default_value_t = SearchOutputFormatArg::default(), value_name = "FORMAT")]
+    #[arg(short = 'f', long, default_value_t = SearchOutputFormatArg::default(), value_name = "FORMAT")]
     pub format: SearchOutputFormatArg,
 
     /// Alias for --format json
@@ -1421,6 +1421,34 @@ mod tests {
             Some(Commands::Search(args)) => {
                 assert_eq!(args.match_.as_deref(), Some("TODO|pending"));
                 assert_eq!(args.exclude.as_deref(), Some("example|示例"));
+            }
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn search_accepts_short_aliases() {
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "s",
+            "agent",
+            "-m",
+            "TODO|pending",
+            "-v",
+            "example|示例",
+            "-i",
+            "title",
+            "-f",
+            "timeline",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(Commands::Search(args)) => {
+                assert_eq!(args.match_.as_deref(), Some("TODO|pending"));
+                assert_eq!(args.exclude.as_deref(), Some("example|示例"));
+                assert_eq!(args.in_field, SearchFieldArg::Title);
+                assert_eq!(args.format, SearchOutputFormatArg::Timeline);
             }
             _ => panic!("expected search command"),
         }
