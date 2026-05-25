@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sivtr_core::ai::{AgentProvider, AgentSessionProvider};
 use sivtr_core::record::{RecordTextMode, WorkOutcome, WorkRecord, WorkRecordKind, WorkRef};
 
@@ -48,6 +48,17 @@ struct SearchJsonItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     duration_ms: Option<u64>,
     matches: Vec<SearchJsonMatch>,
+}
+
+#[derive(Deserialize)]
+struct PipedSearchJson {
+    results: Vec<PipedSearchItem>,
+}
+
+#[derive(Deserialize)]
+struct PipedSearchItem {
+    #[serde(rename = "ref")]
+    ref_: String,
 }
 
 struct SearchResultGroup<'a> {
@@ -189,32 +200,20 @@ fn read_piped_record_refs() -> Result<Option<HashSet<String>>> {
     let mut input = String::new();
     io::stdin()
         .read_to_string(&mut input)
-        .context("Failed to read piped search refs from stdin")?;
-    let refs = input
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(record_ref_from_input)
-        .collect::<HashSet<_>>();
+        .context("Failed to read piped search JSON from stdin")?;
+    if input.trim().is_empty() {
+        return Ok(None);
+    }
 
-    if refs.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(refs))
-    }
-}
-
-fn record_ref_from_input(input: &str) -> String {
-    let parts = input.split('/').collect::<Vec<_>>();
-    if parts.first().is_some_and(|source| *source == "terminal") && parts.len() >= 3 {
-        return parts[..3].join("/");
-    }
-    if AgentProvider::from_command_name(parts.first().copied().unwrap_or_default()).is_some()
-        && parts.len() >= 3
-    {
-        return parts[..3].join("/");
-    }
-    input.to_string()
+    let piped: PipedSearchJson =
+        serde_json::from_str(&input).context("Failed to parse piped search JSON from stdin")?;
+    Ok(Some(
+        piped
+            .results
+            .into_iter()
+            .map(|result| result.ref_)
+            .collect(),
+    ))
 }
 
 impl SearchTarget {
@@ -999,14 +998,25 @@ mod tests {
     }
 
     #[test]
-    fn record_ref_from_input_accepts_record_and_line_refs() {
-        assert_eq!(
-            record_ref_from_input("terminal/session_1/3/2"),
-            "terminal/session_1/3"
-        );
-        assert_eq!(record_ref_from_input("pi/019e5941/7/12"), "pi/019e5941/7");
-        assert_eq!(record_ref_from_input("pi/019e5941/7"), "pi/019e5941/7");
-        assert_eq!(record_ref_from_input("not-a-ref"), "not-a-ref");
+    fn read_piped_search_json_uses_result_refs() {
+        let piped: PipedSearchJson = serde_json::from_str(
+            r#"{
+              "results": [
+                {"ref": "terminal/session_1/3", "matches": [{"ref": "terminal/session_1/3/2"}]},
+                {"ref": "pi/019e5941/7"}
+              ]
+            }"#,
+        )
+        .unwrap();
+        let refs = piped
+            .results
+            .into_iter()
+            .map(|result| result.ref_)
+            .collect::<HashSet<_>>();
+
+        assert!(refs.contains("terminal/session_1/3"));
+        assert!(refs.contains("pi/019e5941/7"));
+        assert!(!refs.contains("terminal/session_1/3/2"));
     }
 
     #[test]

@@ -234,7 +234,7 @@ Targets：
 | `--refs` | `--format refs` 的别名；逐行打印 record refs |
 | `--format <FORMAT>`、`-f <FORMAT>` | `timeline`、`compact`、`md`、`refs` 或 `json`；默认是 `json` |
 
-当 stdin 管道输入到 `sivtr search` 时，每个非空输入行都会被当作 record ref 过滤器。这样可以自然串联 search：前一次输出 refs，下一次继续过滤这些 records。
+当 stdin 管道输入到 `sivtr search` 时，它必须是前一个 search 输出的 JSON。中间 search 保持默认 JSON 格式，最后一个 search 再选择展示格式。
 
 时间过滤支持 RFC3339 时间戳、Unix 秒/毫秒、`30m`、`2h`、`7d` 这样的相对时间，以及 `today`、`yesterday`、`tomorrow`、`this morning`、`this afternoon`、`this evening`、`tonight`、`now` 等别名。
 
@@ -243,7 +243,7 @@ Targets：
 ```bash
 sivtr search terminal --status failure --latest 1 --json
 sivtr s terminal -m "panic|failed" -v "example|sample" --since today --refs
-sivtr s terminal -m "panic|failed" -i content --refs | sivtr s terminal -v "demo" -i title -f timeline
+sivtr s terminal -m "panic|failed" | sivtr s terminal -v "demo" -i title -f timeline
 sivtr search agent --match "TODO|failed|next step" --since yesterday --format md
 sivtr search pi --since today --sort oldest --format timeline
 sivtr search pi/019e5941 --match "cargo test" --format compact

@@ -434,13 +434,13 @@ Filters:
   --format <format>    Output format: timeline, compact, md, refs, or json
 
 Pipelines:
-  If stdin is piped into `sivtr search`, each non-empty input line is treated as a record ref filter.
-  Use `--refs` in an earlier search to chain filters across fields.
+  If stdin is piped into `sivtr search`, it must be JSON output from a previous search.
+  Leave intermediate searches on the default JSON format, then choose the display format on the final search.
 
 Examples:
   sivtr search terminal --status failure --latest 1 --json
   sivtr s terminal --status fail -m "panic|failed" -v "example|sample" --latest 20 --refs
-  sivtr s terminal -m "panic|failed" -i content --refs | sivtr s terminal -v "demo" -i title -f timeline
+  sivtr s terminal -m "panic|failed" | sivtr s terminal -v "demo" -i title -f timeline
   sivtr search pi --match "merge|conflict" --latest 20 --format timeline
   sivtr search pi/019e5941 --match "cargo test" --format md
   sivtr search pi/019e5941/7 --format json
