@@ -12,6 +12,63 @@ For the full human + agent workflow, install two pieces:
 
 Human-only browsing can work with just the CLI. Agent workflows should install both.
 
+## AI Assistant Quick Install
+
+If you are an AI coding assistant (Claude Code, Codex, etc.) installing sivtr on behalf of a user:
+
+### Pre-Installation Check
+
+```bash
+sivtr --version    # Already installed?
+sivtr doctor       # Full environment check
+```
+
+If `sivtr --version` succeeds, **do not reinstall**. Run `sivtr doctor` to verify the environment and skip to the skill installation below.
+
+### Install Steps
+
+```bash
+# 1. Install binary
+cargo install sivtr
+
+# 2. Verify
+sivtr --version
+
+# 3. Shell hook (pick one)
+sivtr init bash       # Linux default
+sivtr init zsh        # macOS default
+sivtr init powershell # Windows
+sivtr init nushell
+
+# 4. Config
+sivtr config init
+
+# 5. Skill (for agent workflows)
+npx skills add Ariestar/sivtr --skill sivtr-memory -g
+```
+
+### Post-Install Verification
+
+```bash
+sivtr doctor
+```
+
+Expected output: all checks passing. If `shell hooks` shows "not installed", run the appropriate `sivtr init` command. If `session log directory` shows "missing", the user needs to restart their terminal after `sivtr init`.
+
+### Check Current Status
+
+```bash
+sivtr init show       # Which shell hooks are installed
+sivtr doctor          # Full diagnostics
+```
+
+### Uninstall
+
+```bash
+sivtr init uninstall  # Remove all shell hooks
+cargo uninstall sivtr # Remove binary
+```
+
 ## Requirements
 
 - Rust and Cargo
@@ -97,7 +154,19 @@ sivtr init zsh
 sivtr init nushell
 ```
 
-Restart the terminal after installation.
+Check which hooks are installed:
+
+```bash
+sivtr init show
+```
+
+Uninstall all hooks:
+
+```bash
+sivtr init uninstall
+```
+
+Restart the terminal after installation or removal.
 
 The hook writes a per-process session log:
 
