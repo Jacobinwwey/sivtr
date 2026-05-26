@@ -125,7 +125,7 @@ fn run_workspace() -> Result<()> {
         .collect::<Vec<_>>();
     commands::copy::execute_agent_picker(AgentPickerRequest {
         providers: &providers,
-        pick_current_session: false,
+        pick_current_session: true,
         selection_mode: AgentSelection::LastTurn,
         print_full: false,
         regex: None,

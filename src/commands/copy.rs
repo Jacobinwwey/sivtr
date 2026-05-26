@@ -545,15 +545,28 @@ fn load_workspace_session(session: &WorkspaceSession) -> Result<WorkspaceSession
         modified: load.modified,
     };
     let parsed = source.parse_session_file(&load.path)?;
-    build_agent_session_choice(source.as_ref(), &info, parsed, load.selection_mode).with_context(
-        || {
-            format!(
-                "{} session has no selectable content: {}",
-                load.provider.name(),
-                load.path.display()
-            )
-        },
-    )
+    match build_agent_session_choice(source.as_ref(), &info, parsed, load.selection_mode) {
+        Some(session) => Ok(session),
+        None => Ok(empty_loaded_agent_session(load)),
+    }
+}
+
+fn empty_loaded_agent_session(load: &WorkspaceSessionLoad) -> WorkspaceSession {
+    let info = AgentSessionInfo {
+        path: load.path.clone(),
+        id: load.id.clone(),
+        cwd: load.cwd.clone(),
+        title: load.title.clone(),
+        modified: load.modified,
+    };
+    WorkspaceSession {
+        source: WorkspaceSource::Agent(load.provider),
+        modified: load.modified,
+        title: agent_session_info_display_title(&info),
+        search_title: agent_session_info_fallback_title(&info),
+        records: Vec::new(),
+        load: None,
+    }
 }
 
 pub(super) fn load_workspace_session_at(
@@ -1197,9 +1210,10 @@ fn record_text_mode(mode: CopyMode) -> RecordTextMode {
 mod tests {
     use super::vim::{is_vim_command, vim_single_quote};
     use super::{
-        agent_session_preview, filter_lines_by_regex, filter_lines_by_spec, record_to_copy_parts,
-        records_to_text_pairs, resolve_agent_session_selector, AgentBlockKind, AgentProvider,
-        AgentSelection, AgentSession, AgentSessionInfo, AgentSessionProvider, TextPair,
+        agent_session_preview, filter_lines_by_regex, filter_lines_by_spec, load_workspace_session,
+        record_to_copy_parts, records_to_text_pairs, resolve_agent_session_selector,
+        AgentBlockKind, AgentProvider, AgentSelection, AgentSession, AgentSessionInfo,
+        AgentSessionProvider, TextPair,
     };
     use anyhow::Result;
     use sivtr_core::ai::AgentBlock;
@@ -1638,6 +1652,36 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("missing session fixture: {}", path.display()))
         }
+    }
+
+    #[test]
+    fn lazy_workspace_session_with_no_selectable_content_loads_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"timestamp":"2026-02-15T00:00:00Z","type":"session_meta","payload":{"id":"empty","cwd":"d:\\repo"}}
+{"timestamp":"2026-02-15T00:00:01Z","type":"response_item","payload":{"type":"function_call","name":"Bash","arguments":"{\"command\":\"echo hi\"}"}}
+"#,
+        )
+        .unwrap();
+        let session = super::build_lazy_agent_session_choice(
+            AgentProvider::Codex,
+            AgentSessionInfo {
+                path: path.clone(),
+                id: Some("empty".to_string()),
+                cwd: Some("d:\\repo".to_string()),
+                title: None,
+                modified: SystemTime::UNIX_EPOCH,
+            },
+            AgentSelection::LastTurn,
+        );
+
+        let loaded = load_workspace_session(&session).unwrap();
+
+        assert!(loaded.records.is_empty());
+        assert!(loaded.load.is_none());
+        assert_eq!(loaded.title, "empty  [empty]");
     }
 
     #[test]
