@@ -28,8 +28,9 @@ sivtr doctor       # 完整环境检查
 ### 安装步骤
 
 ```bash
-# 1. 安装二进制
-cargo install sivtr
+# 1. 安装二进制（选一个）
+cargo install sivtr          # 从源码编译（需要 Rust）
+curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh  # 预编译二进制
 
 # 2. 验证
 sivtr --version
@@ -94,6 +95,22 @@ cargo install sivtr
 sivtr --version
 sivtr --help
 ```
+
+## 快速安装（Linux/macOS）
+
+下载预编译二进制，无需编译：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh
+```
+
+指定版本：
+
+```bash
+SIVTR_VERSION=v0.1.3 curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh
+```
+
+安装到 `~/.local/bin/sivtr`（或 `$SIVTR_INSTALL_DIR`）。无需 Rust 工具链。
 
 ## 从源码安装
 

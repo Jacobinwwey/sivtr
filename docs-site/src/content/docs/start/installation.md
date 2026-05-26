@@ -28,8 +28,9 @@ If `sivtr --version` succeeds, **do not reinstall**. Run `sivtr doctor` to verif
 ### Install Steps
 
 ```bash
-# 1. Install binary
-cargo install sivtr
+# 1. Install binary (choose one)
+cargo install sivtr          # from source (requires Rust)
+curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh  # pre-built
 
 # 2. Verify
 sivtr --version
@@ -94,6 +95,22 @@ Verify the binary:
 sivtr --version
 sivtr --help
 ```
+
+## Quick Install (Linux/macOS)
+
+Download a pre-built binary without compiling:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh
+```
+
+Pin a specific version:
+
+```bash
+SIVTR_VERSION=v0.1.3 curl -fsSL https://raw.githubusercontent.com/Ariestar/sivtr/main/install.sh | sh
+```
+
+This downloads a static binary to `~/.local/bin/sivtr` (or `$SIVTR_INSTALL_DIR`). Requires no Rust toolchain.
 
 ## Install from source
 
