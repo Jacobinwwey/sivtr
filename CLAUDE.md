@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **sivtr** is a terminal output workspace that captures, browses, searches, and reuses terminal command output and AI coding assistant sessions. Four AI providers (Codex, Claude Code, OpenCode, Pi) and four shells (Bash, Zsh, PowerShell, Nushell).
 
-Architecture: CLI binary (`src/`) wrapping a core library (`crates/sivtr-core/`). Clap-based subcommands for copy, search, show, work, init, diff, hotkey. TUI mode for browse/search views.
+Architecture: CLI binary (`src/`) wrapping a core library (`crates/sivtr-core/`). Clap-based subcommands for copy, search, show, work, init, diff, hotkey, doctor. TUI mode for browse/search views.
 
 ## Development Commands
 
@@ -42,11 +42,12 @@ src/                       ← CLI binary
   main.rs                  ← Command routing
   cli.rs                   ← All Clap definitions
   commands/
-    init.rs                ← Shell hook injection
+    init.rs                ← Shell hook injection + show/uninstall
     copy.rs                ← Copy + workspace picker
     search.rs              ← Search with pipeline chaining
     show.rs / diff.rs / work.rs  ← Ref display commands
     config.rs              ← Config init/show/edit
+    doctor.rs              ← Environment diagnostics
     hotkey.rs              ← Global hotkey daemon (Windows)
     flush.rs               ← Internal: shell hook callback
   tui/                     ← Terminal UI framework
@@ -88,3 +89,13 @@ sivtr search terminal --status failure --json | sivtr search terminal --exclude 
 ```
 
 Target selectors: `terminal/<session>/<record>/<line>`, `agent/<session>/<turn>`, `<provider>/<session>/<turn>`. Use `*` for wildcards.
+
+## Diagnostics
+
+```bash
+sivtr doctor        # Check binary, config, session logs, hooks, providers, clipboard
+sivtr init show     # Show which shell hooks are installed
+sivtr init uninstall # Remove all shell hooks
+```
+
+Run `sivtr doctor` after any installation or when troubleshooting.

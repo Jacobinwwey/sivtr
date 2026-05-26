@@ -16,7 +16,7 @@ src/
 ├── app.rs                     ← Application state
 ├── command_blocks.rs          ← Command block parsing and selection
 ├── commands/
-│   ├── init.rs                ← Shell hook injection (bash/zsh/pwsh/nu)
+│   ├── init.rs                ← Shell hook injection + show/uninstall
 │   ├── copy.rs                ← Copy command + workspace picker
 │   ├── copy/workspace_picker.rs ← Interactive picker TUI
 │   ├── search.rs              ← Search command with pipeline
@@ -24,6 +24,7 @@ src/
 │   ├── diff.rs                ← Diff two blocks
 │   ├── work.rs                ← Workspace traversal
 │   ├── config.rs              ← Config init/show/edit
+│   ├── doctor.rs              ← Environment diagnostics
 │   ├── hotkey.rs              ← Global hotkey (Windows)
 │   ├── flush.rs               ← Internal: shell hook callback
 │   ├── browse.rs              ← TUI browse entry
