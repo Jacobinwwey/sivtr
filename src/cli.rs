@@ -501,7 +501,7 @@ pub enum Commands {
 
     /// Generate shell integration or desktop shortcut helpers
     Init {
-        /// Integration target: powershell, bash, zsh, nushell, all, tmux, linux-shortcut, macos-shortcut
+        /// Integration target: powershell, bash, zsh, nushell, all, tmux, linux-shortcut, macos-shortcut, show, uninstall
         #[arg(value_name = "TARGET", allow_hyphen_values = true)]
         target: String,
     },
@@ -1659,6 +1659,26 @@ mod tests {
 
         match cli.command {
             Some(Commands::Init { target }) => assert_eq!(target, "-all"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_show_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "show"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { target }) => assert_eq!(target, "show"),
+            _ => panic!("expected init command"),
+        }
+    }
+
+    #[test]
+    fn init_accepts_uninstall_target() {
+        let cli = Cli::try_parse_from(["sivtr", "init", "uninstall"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Init { target }) => assert_eq!(target, "uninstall"),
             _ => panic!("expected init command"),
         }
     }
