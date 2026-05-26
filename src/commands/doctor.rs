@@ -14,37 +14,40 @@ pub fn execute() -> Result<()> {
     // Config file
     checks += 1;
     eprintln!("[check] config file");
-    let config_dir = dirs::config_dir().unwrap_or_default().join("sivtr");
-    let config_path = config_dir.join("config.toml");
-    if config_path.exists() {
-        eprintln!("  found: {}", config_path.display());
-        passed += 1;
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_path = config_dir.join("sivtr").join("config.toml");
+        if config_path.exists() {
+            eprintln!("  found: {}", config_path.display());
+            passed += 1;
+        } else {
+            eprintln!("  missing (run `sivtr config init` to create)");
+        }
     } else {
-        eprintln!("  missing (run `sivtr config init` to create)");
+        eprintln!("  unable to determine config directory");
     }
 
     // Session log directory
     checks += 1;
     eprintln!("[check] session log directory");
-    let state_dir = dirs::state_dir().unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".local")
-            .join("state")
-    });
-    let session_dir = state_dir.join("sivtr");
-    if session_dir.exists() {
-        let count = std::fs::read_dir(&session_dir)
-            .map(|d| d.count())
-            .unwrap_or(0);
-        eprintln!(
-            "  found: {} ({} session logs)",
-            session_dir.display(),
-            count
-        );
-        passed += 1;
+    if let Some(state_dir) =
+        dirs::state_dir().or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
+    {
+        let session_dir = state_dir.join("sivtr");
+        if session_dir.exists() {
+            let count = std::fs::read_dir(&session_dir)
+                .map(|d| d.count())
+                .unwrap_or(0);
+            eprintln!(
+                "  found: {} ({} session logs)",
+                session_dir.display(),
+                count
+            );
+            passed += 1;
+        } else {
+            eprintln!("  missing (will be created on first `sivtr init` + terminal restart)");
+        }
     } else {
-        eprintln!("  missing (will be created on first `sivtr init` + terminal restart)");
+        eprintln!("  unable to determine state or home directory");
     }
 
     // Shell hooks
@@ -112,21 +115,22 @@ fn check_shell_hooks() -> bool {
     }
 
     // Nushell
-    let nu_config = dirs::config_dir()
-        .unwrap_or_default()
-        .join("nushell")
-        .join("config.nu");
-    if nu_config.exists() {
-        if let Ok(content) = std::fs::read_to_string(&nu_config) {
-            if content.contains("# >>> sivtr shell integration >>>") {
-                eprintln!("  nushell: installed");
-                any_installed = true;
-            } else {
-                eprintln!("  nushell: not installed");
+    if let Some(config_dir) = dirs::config_dir() {
+        let nu_config = config_dir.join("nushell").join("config.nu");
+        if nu_config.exists() {
+            if let Ok(content) = std::fs::read_to_string(&nu_config) {
+                if content.contains("# >>> sivtr shell integration >>>") {
+                    eprintln!("  nushell: installed");
+                    any_installed = true;
+                } else {
+                    eprintln!("  nushell: not installed");
+                }
             }
+        } else {
+            eprintln!("  nushell: no config file");
         }
     } else {
-        eprintln!("  nushell: no config file");
+        eprintln!("  nushell: unable to determine config directory");
     }
 
     // PowerShell

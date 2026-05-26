@@ -496,6 +496,11 @@ fn show_status() -> Result<()> {
                 if content.contains(POWERSHELL_MARKER_START) || content.contains(POWERSHELL_HOOK) {
                     eprintln!("  powershell ({cmd}): installed in {profile}");
                     any_installed = true;
+                } else if content.contains(LEGACY_MARKER_START)
+                    || content.contains(LEGACY_POWERSHELL_HOOK)
+                {
+                    eprintln!("  powershell ({cmd}): legacy integration in {profile} (run `sivtr init powershell` to update)");
+                    any_installed = true;
                 } else {
                     eprintln!("  powershell ({cmd}): not installed ({profile})");
                 }
@@ -514,6 +519,20 @@ fn show_status() -> Result<()> {
                         || content.contains(spec_ref.spec.hook)
                     {
                         eprintln!("  {}: installed in {}", spec_ref.name, path.display());
+                        any_installed = true;
+                    } else if content.contains(spec_ref.spec.legacy_marker_start)
+                        || spec_ref
+                            .spec
+                            .legacy_hook
+                            .map(|h| content.contains(h))
+                            .unwrap_or(false)
+                    {
+                        eprintln!(
+                            "  {}: legacy integration in {} (run `sivtr init {}` to update)",
+                            spec_ref.name,
+                            path.display(),
+                            spec_ref.name
+                        );
                         any_installed = true;
                     } else {
                         eprintln!("  {}: not installed ({})", spec_ref.name, path.display());
@@ -662,8 +681,21 @@ fn remove_hook_block(content: &str, spec: &HookSpec) -> Option<String> {
         updated.push_str(&content[..start]);
         updated.push_str(content[end..].trim_start_matches('\n'));
         Some(updated)
+    } else if let Some((start, end)) =
+        find_marked_block(content, spec.legacy_marker_start, spec.legacy_marker_end)
+    {
+        let mut updated = String::with_capacity(content.len() - (end - start));
+        updated.push_str(&content[..start]);
+        updated.push_str(content[end..].trim_start_matches('\n'));
+        Some(updated)
     } else if content.contains(spec.hook) {
         Some(content.replacen(spec.hook, "", 1))
+    } else if let Some(legacy_hook) = spec.legacy_hook {
+        if content.contains(legacy_hook) {
+            Some(content.replacen(legacy_hook, "", 1))
+        } else {
+            None
+        }
     } else {
         None
     }
