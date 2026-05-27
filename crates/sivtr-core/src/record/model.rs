@@ -1,4 +1,4 @@
-use super::refs::WorkRef;
+use super::refs::{WorkRef, WorkRefTarget};
 use crate::ai::{
     format_blocks_with_text, select_blocks, AgentBlock, AgentBlockKind, AgentProvider,
     AgentSelection, AgentSession,
@@ -131,12 +131,48 @@ pub struct WorkStatus {
     pub exit_code: Option<i32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkPartIo {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkPartKind {
+    Prompt,
+    Command,
+    UserMessage,
+    AssistantMessage,
+    ToolCall,
+    ToolOutput,
+    Text,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkPart {
+    pub io: WorkPartIo,
+    pub kind: WorkPartKind,
+    pub index_in_record: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ansi: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct WorkText {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    #[serde(default)]
+    pub combined: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -179,6 +215,8 @@ pub struct WorkRecord {
     pub status: WorkStatus,
     pub title: String,
     pub text: WorkText,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<WorkPart>,
     pub payload: WorkPayload,
 }
 
@@ -222,7 +260,9 @@ impl WorkRecord {
             text: WorkText {
                 input: non_empty(Some(command.clone())),
                 output: non_empty(Some(output.clone())),
+                combined: join_nonempty([command.as_str(), output.as_str()]),
             },
+            parts: terminal_parts(entry, &command, &output),
             payload: WorkPayload::TerminalCommand {
                 prompt: entry.prompt.clone(),
                 command,
@@ -309,7 +349,9 @@ impl WorkRecord {
             text: WorkText {
                 input: non_empty(Some(user.clone())),
                 output: non_empty(Some(assistant.clone())),
+                combined: format_blocks_with_compacted_skills(&chat_blocks),
             },
+            parts: agent_parts(blocks),
             payload: WorkPayload::ChatTurn {
                 user,
                 assistant,
@@ -420,6 +462,28 @@ impl WorkRecord {
             ),
             command: self.copy_text_with_prompt(RecordTextMode::Command, false, None),
         }
+    }
+
+    pub fn content_for_target(&self, target: WorkRefTarget) -> Option<&str> {
+        match target {
+            WorkRefTarget::Record => Some(self.text.combined.as_str()),
+            WorkRefTarget::Line(line) => line
+                .checked_sub(1)
+                .and_then(|index| self.text.combined.lines().nth(index)),
+            WorkRefTarget::Part { .. } => {
+                self.part_for_target(target).map(|part| part.text.as_str())
+            }
+        }
+    }
+
+    pub fn part_for_target(&self, target: WorkRefTarget) -> Option<&WorkPart> {
+        let (io, index) = match target {
+            WorkRefTarget::Part { io, index } => (io, index),
+            WorkRefTarget::Record | WorkRefTarget::Line(_) => return None,
+        };
+        self.parts
+            .iter()
+            .find(|part| part.io == io && part.index_in_record == index)
     }
 }
 
@@ -582,7 +646,12 @@ fn selected_block_record(
             exit_code: None,
         },
         title,
-        text: WorkText { input, output },
+        text: WorkText {
+            input: input.clone(),
+            output: output.clone(),
+            combined: text.clone(),
+        },
+        parts: agent_parts(std::slice::from_ref(&block)),
         payload: WorkPayload::ChatTurn {
             user: match kind {
                 AgentBlockKind::User => text.clone(),
@@ -616,6 +685,7 @@ fn selected_group_record(
     let work_ref = WorkRef::agent_record(provider, session_ref.clone(), 1);
     let started_at = first_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
     let ended_at = last_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
+    let parts = agent_parts(&blocks);
     vec![WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
         work_ref,
@@ -631,7 +701,9 @@ fn selected_group_record(
         text: WorkText {
             input: None,
             output: Some(combined.clone()),
+            combined: combined.clone(),
         },
+        parts,
         payload: WorkPayload::ChatTurn {
             user: String::new(),
             assistant: combined,
@@ -851,6 +923,88 @@ fn join_nonempty<'a>(texts: impl IntoIterator<Item = &'a str>) -> String {
 
 fn non_empty(value: Option<String>) -> Option<String> {
     value.and_then(|value| (!value.trim().is_empty()).then_some(value))
+}
+
+fn terminal_parts(entry: &SessionEntry, command: &str, output: &str) -> Vec<WorkPart> {
+    let mut parts = Vec::new();
+    let mut input_count = 0;
+    let mut output_count = 0;
+    let prompt = entry.prompt.trim_end_matches(['\r', '\n']);
+    if !prompt.trim().is_empty() {
+        input_count += 1;
+        parts.push(WorkPart {
+            io: WorkPartIo::Input,
+            kind: WorkPartKind::Prompt,
+            index_in_record: input_count,
+            occurred_at: entry.ended_at.clone(),
+            label: None,
+            text: prompt.to_string(),
+            ansi: entry.prompt_ansi.clone(),
+        });
+    }
+    if !command.is_empty() {
+        input_count += 1;
+        parts.push(WorkPart {
+            io: WorkPartIo::Input,
+            kind: WorkPartKind::Command,
+            index_in_record: input_count,
+            occurred_at: entry.ended_at.clone(),
+            label: None,
+            text: command.to_string(),
+            ansi: None,
+        });
+    }
+    if !output.is_empty() {
+        output_count += 1;
+        parts.push(WorkPart {
+            io: WorkPartIo::Output,
+            kind: WorkPartKind::Text,
+            index_in_record: output_count,
+            occurred_at: entry.ended_at.clone(),
+            label: None,
+            text: output.to_string(),
+            ansi: entry.output_ansi.clone(),
+        });
+    }
+    parts
+}
+
+fn agent_parts(blocks: &[AgentBlock]) -> Vec<WorkPart> {
+    let mut parts = Vec::new();
+    let mut input_count = 0;
+    let mut output_count = 0;
+    for block in blocks {
+        let text = block.text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let (io, kind) = match block.kind {
+            AgentBlockKind::User => (WorkPartIo::Input, WorkPartKind::UserMessage),
+            AgentBlockKind::Assistant => (WorkPartIo::Output, WorkPartKind::AssistantMessage),
+            AgentBlockKind::ToolCall => (WorkPartIo::Input, WorkPartKind::ToolCall),
+            AgentBlockKind::ToolOutput => (WorkPartIo::Output, WorkPartKind::ToolOutput),
+        };
+        let index_in_record = match io {
+            WorkPartIo::Input => {
+                input_count += 1;
+                input_count
+            }
+            WorkPartIo::Output => {
+                output_count += 1;
+                output_count
+            }
+        };
+        parts.push(WorkPart {
+            io,
+            kind,
+            index_in_record,
+            occurred_at: block.timestamp.clone(),
+            label: block.label.clone(),
+            text,
+            ansi: None,
+        });
+    }
+    parts
 }
 
 #[cfg(test)]

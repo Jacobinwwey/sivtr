@@ -991,7 +991,9 @@ mod tests {
             text: WorkText {
                 input: Some("cargo test".to_string()),
                 output: Some(combined.to_string()),
+                combined: combined.to_string(),
             },
+            parts: Vec::new(),
             payload: WorkPayload::TerminalCommand {
                 prompt: String::new(),
                 command: String::new(),
