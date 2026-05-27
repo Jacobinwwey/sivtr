@@ -127,11 +127,10 @@ impl WorkspaceDialogue {
             return match mode {
                 ContentViewMode::Raw => self
                     .targeted_plain_text(target)
-                    .unwrap_or(&self.unit.plain)
-                    .to_string(),
+                    .unwrap_or_else(|| self.unit.plain.clone()),
                 ContentViewMode::Reading => self
                     .targeted_structured_text(target)
-                    .or_else(|| self.targeted_plain_text(target).map(str::to_string))
+                    .or_else(|| self.targeted_plain_text(target))
                     .unwrap_or_else(|| self.unit.plain.clone()),
             };
         }
@@ -170,7 +169,7 @@ impl WorkspaceDialogue {
         })
     }
 
-    fn targeted_plain_text(&self, target: WorkRefTarget) -> Option<&str> {
+    fn targeted_plain_text(&self, target: WorkRefTarget) -> Option<String> {
         let WorkRefTarget::Part { .. } = target else {
             return None;
         };
@@ -188,7 +187,7 @@ impl WorkspaceDialogue {
 
 fn structured_record_text(record: &WorkRecord) -> String {
     if record.parts.is_empty() {
-        return record.text.combined.clone();
+        return record.combined_text();
     }
 
     record
@@ -224,10 +223,7 @@ fn structured_part_text(record: &WorkRecord, part: &sivtr_core::record::WorkPart
 fn structured_part_marker_line(record: &WorkRecord, part: &sivtr_core::record::WorkPart) -> String {
     let mut markers = vec![format!(
         "`{}`",
-        record
-            .session
-            .work_ref
-            .with_part(part.io, part.index_in_record)
+        record.work_ref.with_part(part.io, part.index)
     )];
     if let Some(timestamp) = part.occurred_at.as_deref().or(record.time.primary_at()) {
         markers.push(format!("`{timestamp}`"));
@@ -1394,7 +1390,6 @@ mod tests {
     fn content_preview_text_uses_targeted_part_text_in_raw_mode() {
         let record = WorkRecord {
             schema_version: 1,
-            id: "codex/session/1".to_string(),
             work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             kind: sivtr_core::record::WorkRecordKind::ChatTurn,
             source: sivtr_core::record::WorkSource {
@@ -1405,35 +1400,20 @@ mod tests {
                 id: "session".to_string(),
                 canonical_id: None,
                 path: None,
-                index: 0,
-                work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             },
             cwd: None,
             time: sivtr_core::record::WorkTime::default(),
-            status: sivtr_core::record::WorkStatus {
-                outcome: sivtr_core::record::WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "cmd".to_string(),
-            text: sivtr_core::record::WorkText {
-                input: Some("visible".to_string()),
-                output: Some("answer".to_string()),
-                combined: "visible\nanswer".to_string(),
-            },
             parts: vec![sivtr_core::record::WorkPart {
                 io: sivtr_core::record::WorkPartIo::Input,
                 kind: sivtr_core::record::WorkPartKind::ToolCall,
-                index_in_record: 1,
+                index: 1,
                 occurred_at: None,
                 label: Some("tool".to_string()),
                 text: "hidden tool call".to_string(),
                 ansi: None,
             }],
-            payload: sivtr_core::record::WorkPayload::ChatTurn {
-                user: "visible".to_string(),
-                assistant: "answer".to_string(),
-                messages: Vec::new(),
-            },
         };
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::Agent(AgentProvider::Codex),
@@ -1466,7 +1446,6 @@ mod tests {
     fn content_preview_text_uses_structured_targeted_part_text_in_reading_mode() {
         let record = WorkRecord {
             schema_version: 1,
-            id: "codex/session/1".to_string(),
             work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             kind: sivtr_core::record::WorkRecordKind::ChatTurn,
             source: sivtr_core::record::WorkSource {
@@ -1477,35 +1456,20 @@ mod tests {
                 id: "session".to_string(),
                 canonical_id: None,
                 path: None,
-                index: 0,
-                work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             },
             cwd: None,
             time: sivtr_core::record::WorkTime::default(),
-            status: sivtr_core::record::WorkStatus {
-                outcome: sivtr_core::record::WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "cmd".to_string(),
-            text: sivtr_core::record::WorkText {
-                input: Some("visible".to_string()),
-                output: Some("answer".to_string()),
-                combined: "visible\nanswer".to_string(),
-            },
             parts: vec![sivtr_core::record::WorkPart {
                 io: sivtr_core::record::WorkPartIo::Input,
                 kind: sivtr_core::record::WorkPartKind::ToolCall,
-                index_in_record: 1,
+                index: 1,
                 occurred_at: None,
                 label: Some("tool".to_string()),
                 text: "hidden tool call".to_string(),
                 ansi: None,
             }],
-            payload: sivtr_core::record::WorkPayload::ChatTurn {
-                user: "visible".to_string(),
-                assistant: "answer".to_string(),
-                messages: Vec::new(),
-            },
         };
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::Agent(AgentProvider::Codex),
@@ -1539,7 +1503,6 @@ mod tests {
     fn reading_mode_structures_parts_with_headings_and_code_fences() {
         let record = WorkRecord {
             schema_version: 1,
-            id: "codex/session/1".to_string(),
             work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             kind: sivtr_core::record::WorkRecordKind::ChatTurn,
             source: sivtr_core::record::WorkSource {
@@ -1550,8 +1513,6 @@ mod tests {
                 id: "session".to_string(),
                 canonical_id: None,
                 path: None,
-                index: 0,
-                work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             },
             cwd: None,
             time: sivtr_core::record::WorkTime {
@@ -1559,21 +1520,13 @@ mod tests {
                 ended_at: None,
                 duration_ms: None,
             },
-            status: sivtr_core::record::WorkStatus {
-                outcome: sivtr_core::record::WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "cmd".to_string(),
-            text: sivtr_core::record::WorkText {
-                input: Some("question".to_string()),
-                output: Some("answer".to_string()),
-                combined: "question\nanswer".to_string(),
-            },
             parts: vec![
                 sivtr_core::record::WorkPart {
                     io: sivtr_core::record::WorkPartIo::Input,
                     kind: sivtr_core::record::WorkPartKind::UserMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: None,
                     label: None,
                     text: "question".to_string(),
@@ -1582,7 +1535,7 @@ mod tests {
                 sivtr_core::record::WorkPart {
                     io: sivtr_core::record::WorkPartIo::Input,
                     kind: sivtr_core::record::WorkPartKind::ToolCall,
-                    index_in_record: 2,
+                    index: 2,
                     occurred_at: None,
                     label: Some("Bash".to_string()),
                     text: "cargo test".to_string(),
@@ -1591,7 +1544,7 @@ mod tests {
                 sivtr_core::record::WorkPart {
                     io: sivtr_core::record::WorkPartIo::Output,
                     kind: sivtr_core::record::WorkPartKind::ToolOutput,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: None,
                     label: Some("Bash".to_string()),
                     text: "ok".to_string(),
@@ -1600,18 +1553,13 @@ mod tests {
                 sivtr_core::record::WorkPart {
                     io: sivtr_core::record::WorkPartIo::Output,
                     kind: sivtr_core::record::WorkPartKind::AssistantMessage,
-                    index_in_record: 2,
+                    index: 2,
                     occurred_at: None,
                     label: None,
                     text: "answer".to_string(),
                     ansi: None,
                 },
             ],
-            payload: sivtr_core::record::WorkPayload::ChatTurn {
-                user: "question".to_string(),
-                assistant: "answer".to_string(),
-                messages: Vec::new(),
-            },
         };
         let dialogue = WorkspaceDialogue {
             source: WorkspaceSource::Agent(AgentProvider::Codex),

@@ -60,7 +60,6 @@ pub fn execute(args: &ShowArgs) -> Result<()> {
         for work_ref in line_refs {
             let content = record
                 .content_for_target(work_ref.target())
-                .map(str::to_string)
                 .with_context(|| format!("No content found for ref `{work_ref}`"))?;
             let display_ref = match work_ref.target() {
                 WorkRefTarget::Record => record.work_ref.with_target(work_ref.target()),
@@ -116,7 +115,6 @@ fn show_by_ref(args: &ShowArgs, cwd: &std::path::Path, work_ref: &WorkRef) -> Re
         .with_context(|| format!("No record found for ref `{}`", args.reference))?;
     let content = record
         .content_for_target(work_ref.target())
-        .map(str::to_string)
         .with_context(|| format!("No content found for ref `{}`", args.reference))?;
 
     if args.json {

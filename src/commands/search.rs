@@ -128,8 +128,18 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
                     .as_ref()
                     .is_none_or(|refs| refs.contains(&record.work_ref.record_ref().to_string()))
                 && !excluded_session_matches(record, &excluded_sessions)
-                && status_matches(args.status, record.status.outcome)
-                && exit_code_matches(args.exit_code, record.status.exit_code)
+                && status_matches(
+                    args.status,
+                    record
+                        .status
+                        .as_ref()
+                        .map(|status| status.outcome)
+                        .unwrap_or(WorkOutcome::Unknown),
+                )
+                && exit_code_matches(
+                    args.exit_code,
+                    record.status.as_ref().and_then(|status| status.exit_code),
+                )
                 && duration_matches(min_duration_ms, max_duration_ms, record.time.duration_ms)
                 && time_range
                     .as_ref()
@@ -283,20 +293,14 @@ fn field_matches(record: &WorkRecord, field: SearchFieldArg, regex: &Regex) -> b
         SearchFieldArg::Title => regex.is_match(&record.title),
         SearchFieldArg::Session => regex.is_match(record.work_ref.session()),
         SearchFieldArg::Input => record
-            .text
-            .input
-            .as_deref()
-            .is_some_and(|text| regex.is_match(text)),
+            .input_text()
+            .is_some_and(|text| regex.is_match(&text)),
         SearchFieldArg::Output => record
-            .text
-            .output
-            .as_deref()
-            .is_some_and(|text| regex.is_match(text)),
+            .output_text()
+            .is_some_and(|text| regex.is_match(&text)),
         SearchFieldArg::Command => record
-            .text
-            .input
-            .as_deref()
-            .is_some_and(|text| regex.is_match(text)),
+            .input_text()
+            .is_some_and(|text| regex.is_match(&text)),
         SearchFieldArg::All => {
             regex.is_match(&combined_text(record))
                 || regex.is_match(&record.title)
@@ -492,16 +496,18 @@ fn sort_results(results: &mut [SearchMatch<'_>], sort: SearchSortArg) {
         SearchSortArg::ExitCode => results.sort_by(|a, b| {
             b.record
                 .status
-                .exit_code
-                .cmp(&a.record.status.exit_code)
+                .as_ref()
+                .and_then(|status| status.exit_code)
+                .cmp(&a.record.status.as_ref().and_then(|status| status.exit_code))
                 .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::ExitCodeAsc => results.sort_by(|a, b| {
             a.record
                 .status
-                .exit_code
-                .cmp(&b.record.status.exit_code)
+                .as_ref()
+                .and_then(|status| status.exit_code)
+                .cmp(&b.record.status.as_ref().and_then(|status| status.exit_code))
                 .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
@@ -572,16 +578,18 @@ fn sort_group_results(results: &mut [SearchResultGroup<'_>], sort: SearchSortArg
         SearchSortArg::ExitCode => results.sort_by(|a, b| {
             b.record
                 .status
-                .exit_code
-                .cmp(&a.record.status.exit_code)
+                .as_ref()
+                .and_then(|status| status.exit_code)
+                .cmp(&a.record.status.as_ref().and_then(|status| status.exit_code))
                 .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
         SearchSortArg::ExitCodeAsc => results.sort_by(|a, b| {
             a.record
                 .status
-                .exit_code
-                .cmp(&b.record.status.exit_code)
+                .as_ref()
+                .and_then(|status| status.exit_code)
+                .cmp(&b.record.status.as_ref().and_then(|status| status.exit_code))
                 .then_with(|| b.record.time.primary_at().cmp(&a.record.time.primary_at()))
                 .then_with(|| a.ref_.cmp(&b.ref_))
         }),
@@ -662,9 +670,9 @@ fn record_snippet(record: &WorkRecord, field: SearchFieldArg) -> String {
         SearchFieldArg::Title => record.title.as_str(),
         SearchFieldArg::Session => record.work_ref.session(),
         SearchFieldArg::Input | SearchFieldArg::Command => {
-            record.text.input.as_deref().unwrap_or("")
+            return snippet(&record.input_text().unwrap_or_default());
         }
-        SearchFieldArg::Output => record.text.output.as_deref().unwrap_or(""),
+        SearchFieldArg::Output => return snippet(&record.output_text().unwrap_or_default()),
         SearchFieldArg::Content | SearchFieldArg::All => return first_content_snippet(record),
     };
 
@@ -695,8 +703,17 @@ fn search_json_item(result: SearchResultGroup<'_>) -> SearchJsonItem {
         parent_ref: None,
         timestamp: result.record.time.primary_at().map(str::to_string),
         dialogue: result.record.title.clone(),
-        status: result.record.status.outcome,
-        exit_code: result.record.status.exit_code,
+        status: result
+            .record
+            .status
+            .as_ref()
+            .map(|status| status.outcome)
+            .unwrap_or(WorkOutcome::Unknown),
+        exit_code: result
+            .record
+            .status
+            .as_ref()
+            .and_then(|status| status.exit_code),
         duration_ms: result.record.time.duration_ms,
         matches: result
             .matches
@@ -798,7 +815,8 @@ fn escape_markdown_title(title: &str) -> String {
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkPayload, WorkRecordKind, WorkRef, WorkRefSelector, WorkStatus, WorkText, WorkTime,
+        WorkPart, WorkPartIo, WorkPartKind, WorkRecordKind, WorkRef, WorkRefSelector, WorkStatus,
+        WorkTime,
     };
 
     #[test]
@@ -977,7 +995,6 @@ mod tests {
         let work_ref = WorkRef::terminal_record("session_1", 3);
         WorkRecord {
             schema_version: 1,
-            id: work_ref.to_string(),
             work_ref,
             kind: WorkRecordKind::TerminalCommand,
             source: WorkSource {
@@ -988,8 +1005,6 @@ mod tests {
                 id: "session_1".to_string(),
                 canonical_id: Some("session_1".to_string()),
                 path: None,
-                index: 2,
-                work_ref: WorkRef::terminal_record("session_1", 3),
             },
             cwd: None,
             time: WorkTime::from_components(
@@ -997,24 +1012,20 @@ mod tests {
                 None,
                 Some(150),
             ),
-            status: WorkStatus {
+            status: Some(WorkStatus {
                 outcome: WorkOutcome::Failure,
                 exit_code: Some(101),
-            },
+            }),
             title: "cargo test".to_string(),
-            text: WorkText {
-                input: Some("cargo test".to_string()),
-                output: Some(combined.to_string()),
-                combined: combined.to_string(),
-            },
-            parts: Vec::new(),
-            payload: WorkPayload::TerminalCommand {
-                prompt: String::new(),
-                command: String::new(),
-                output: combined.to_string(),
-                prompt_ansi: None,
-                output_ansi: None,
-            },
+            parts: vec![WorkPart {
+                io: WorkPartIo::Output,
+                kind: WorkPartKind::Text,
+                index: 1,
+                occurred_at: None,
+                label: None,
+                text: combined.to_string(),
+                ansi: None,
+            }],
         }
     }
 }

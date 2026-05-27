@@ -39,12 +39,23 @@ pub struct WorkJsonPartMeta {
     pub label: Option<String>,
 }
 
+fn session_ref(record: &WorkRecord) -> String {
+    match &record.work_ref {
+        sivtr_core::record::WorkRef::Terminal { session, .. } => format!("terminal/{session}"),
+        sivtr_core::record::WorkRef::Agent {
+            provider, session, ..
+        } => {
+            format!("{}/{session}", provider.command_name())
+        }
+    }
+}
+
 pub fn session_meta(record: &WorkRecord) -> WorkJsonSessionMeta {
     WorkJsonSessionMeta {
-        ref_: record.session.marker_ref(),
+        ref_: session_ref(record),
         channel: record.source.channel,
         provider: record
-            .session
+            .work_ref
             .provider()
             .map(|provider| provider.command_name().to_string()),
         display_id: record.session.id.clone(),
@@ -57,22 +68,22 @@ pub fn target_meta(record: &WorkRecord, target: WorkRefTarget) -> WorkJsonTarget
     match target {
         WorkRefTarget::Record => WorkJsonTargetMeta {
             type_: "record",
-            record_ref: record.session.work_ref.to_string(),
+            record_ref: record.work_ref.to_string(),
             line: None,
             part: None,
         },
         WorkRefTarget::Line(line) => WorkJsonTargetMeta {
             type_: "line",
-            record_ref: record.session.work_ref.to_string(),
+            record_ref: record.work_ref.to_string(),
             line: Some(line),
             part: None,
         },
         WorkRefTarget::Part { io, index } => WorkJsonTargetMeta {
             type_: "part",
-            record_ref: record.session.work_ref.to_string(),
+            record_ref: record.work_ref.to_string(),
             line: None,
             part: record.part_for_target(target).map(|part| WorkJsonPartMeta {
-                ref_: record.session.work_ref.with_part(io, index).to_string(),
+                ref_: record.work_ref.with_part(io, index).to_string(),
                 io,
                 kind: part.kind,
                 index,
@@ -88,8 +99,8 @@ mod tests {
     use super::*;
     use sivtr_core::ai::AgentProvider;
     use sivtr_core::record::{
-        WorkOutcome, WorkPart, WorkPartIo, WorkPartKind, WorkPayload, WorkRecord, WorkRecordKind,
-        WorkRef, WorkSessionRef, WorkSource, WorkStatus, WorkText, WorkTime,
+        WorkPart, WorkPartIo, WorkPartKind, WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef,
+        WorkSource, WorkTime,
     };
 
     #[test]
@@ -129,7 +140,6 @@ mod tests {
     fn test_record() -> WorkRecord {
         WorkRecord {
             schema_version: 1,
-            id: "codex/shortid/1".to_string(),
             work_ref: WorkRef::agent_record(AgentProvider::Codex, "shortid", 1),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
@@ -140,26 +150,16 @@ mod tests {
                 id: "shortid".to_string(),
                 canonical_id: Some("session-0123456789abcdef".to_string()),
                 path: Some("/tmp/session.jsonl".to_string()),
-                index: 0,
-                work_ref: WorkRef::agent_record(AgentProvider::Codex, "shortid", 1),
             },
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "title".to_string(),
-            text: WorkText {
-                input: Some("user".to_string()),
-                output: Some("assistant".to_string()),
-                combined: "user\nassistant".to_string(),
-            },
             parts: vec![
                 WorkPart {
                     io: WorkPartIo::Input,
                     kind: WorkPartKind::UserMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: None,
                     label: Some("user".to_string()),
                     text: "user".to_string(),
@@ -168,18 +168,13 @@ mod tests {
                 WorkPart {
                     io: WorkPartIo::Output,
                     kind: WorkPartKind::AssistantMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: Some("2026-05-24T12:00:00Z".to_string()),
                     label: Some("assistant".to_string()),
                     text: "assistant".to_string(),
                     ansi: None,
                 },
             ],
-            payload: WorkPayload::ChatTurn {
-                user: "user".to_string(),
-                assistant: "assistant".to_string(),
-                messages: Vec::new(),
-            },
         }
     }
 }

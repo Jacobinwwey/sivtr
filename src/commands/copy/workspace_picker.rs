@@ -2053,7 +2053,7 @@ pub(super) fn workspace_dialogues_for_sessions(
                     .iter()
                     .map(move |record| WorkspaceDialogue {
                         source: session.source,
-                        work_ref: Some(record.session.work_ref.clone()),
+                        work_ref: Some(record.work_ref.clone()),
                         title: record.title.clone(),
                         record: Some(record.clone()),
                         unit: record_text_to_pair(
@@ -2079,7 +2079,7 @@ fn workspace_search_target_ref(
         .get(matched.session_index)?
         .records
         .get(matched.dialogue_index)
-        .map(|record| record.session.work_ref.with_target(matched.target))
+        .map(|record| record.work_ref.with_target(matched.target))
 }
 
 fn active_workspace_content_target(
@@ -2334,8 +2334,8 @@ mod tests {
     use ratatui::widgets::ListState;
     use sivtr_core::ai::AgentProvider;
     use sivtr_core::record::{
-        ChatMessage, WorkChannel, WorkOutcome, WorkPayload, WorkRecord, WorkRecordKind,
-        WorkSessionRef, WorkSource, WorkStatus, WorkText, WorkTime, RECORD_SCHEMA_VERSION,
+        WorkChannel, WorkPart, WorkPartIo, WorkPartKind, WorkRecord, WorkRecordKind,
+        WorkSessionRef, WorkSource, WorkTime, RECORD_SCHEMA_VERSION,
     };
     use sivtr_core::record::{WorkRef, WorkRefTarget};
     use std::time::SystemTime;
@@ -2575,13 +2575,19 @@ mod tests {
                 WorkspaceSearchMatch {
                     session_index: 0,
                     dialogue_index: 0,
-                    target: WorkRefTarget::Line(2),
+                    target: WorkRefTarget::Part {
+                        io: WorkPartIo::Input,
+                        index: 1,
+                    },
                     matched_line: 2,
                 },
                 WorkspaceSearchMatch {
                     session_index: 0,
                     dialogue_index: 0,
-                    target: WorkRefTarget::Line(4),
+                    target: WorkRefTarget::Part {
+                        io: WorkPartIo::Input,
+                        index: 1,
+                    },
                     matched_line: 4,
                 }
             ]
@@ -2599,7 +2605,7 @@ mod tests {
         record.parts = vec![sivtr_core::record::WorkPart {
             io: sivtr_core::record::WorkPartIo::Input,
             kind: sivtr_core::record::WorkPartKind::ToolCall,
-            index_in_record: 1,
+            index: 1,
             occurred_at: None,
             label: Some("tool".to_string()),
             text: "hidden cargo test".to_string(),
@@ -2642,7 +2648,7 @@ mod tests {
         record.parts = vec![sivtr_core::record::WorkPart {
             io: sivtr_core::record::WorkPartIo::Output,
             kind: sivtr_core::record::WorkPartKind::ToolOutput,
-            index_in_record: 1,
+            index: 1,
             occurred_at: None,
             label: Some("tool".to_string()),
             text: "first line\nneedle one\nmiddle\nneedle two".to_string(),
@@ -2697,7 +2703,7 @@ mod tests {
         record.parts = vec![sivtr_core::record::WorkPart {
             io: sivtr_core::record::WorkPartIo::Input,
             kind: sivtr_core::record::WorkPartKind::ToolCall,
-            index_in_record: 1,
+            index: 1,
             occurred_at: None,
             label: Some("tool".to_string()),
             text: "hidden cargo test".to_string(),
@@ -3034,7 +3040,7 @@ mod tests {
         record.parts = vec![sivtr_core::record::WorkPart {
             io: sivtr_core::record::WorkPartIo::Input,
             kind: sivtr_core::record::WorkPartKind::ToolCall,
-            index_in_record: 1,
+            index: 1,
             occurred_at: None,
             label: Some("tool".to_string()),
             text: "hidden cargo test".to_string(),
@@ -3117,39 +3123,27 @@ mod tests {
         };
         WorkRecord {
             schema_version: RECORD_SCHEMA_VERSION,
-            id: work_ref.to_string(),
             work_ref: work_ref.clone(),
             source: WorkSource { channel, provider },
             session: WorkSessionRef {
                 id: "test".to_string(),
                 canonical_id: Some("test-session-0123456789abcdef".to_string()),
                 path: None,
-                index,
-                work_ref: work_ref.clone(),
             },
             kind,
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: title.to_string(),
-            text: WorkText {
-                input: Some(plain.to_string()),
-                output: None,
-                combined: plain.to_string(),
-            },
-            parts: Vec::new(),
-            payload: WorkPayload::ChatTurn {
-                user: plain.to_string(),
-                assistant: String::new(),
-                messages: vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: plain.to_string(),
-                    timestamp: None,
-                }],
-            },
+            parts: vec![WorkPart {
+                io: WorkPartIo::Input,
+                kind: WorkPartKind::UserMessage,
+                index: 1,
+                occurred_at: None,
+                label: None,
+                text: plain.to_string(),
+                ansi: None,
+            }],
         }
     }
 

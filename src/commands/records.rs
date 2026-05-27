@@ -85,7 +85,7 @@ fn dedup_records(records: &mut Vec<WorkRecord>) {
 }
 
 fn record_identity_key(record: &WorkRecord) -> String {
-    match (&record.session.canonical_id, &record.session.work_ref) {
+    match (&record.session.canonical_id, &record.work_ref) {
         (Some(canonical_id), WorkRef::Terminal { record_index, .. }) => {
             format!("terminal:{canonical_id}:{record_index}")
         }
@@ -97,7 +97,7 @@ fn record_identity_key(record: &WorkRecord) -> String {
                 ..
             },
         ) => format!("{}:{canonical_id}:{turn_index}", provider.command_name()),
-        (None, _) => record.id.clone(),
+        (None, _) => record.work_ref.to_string(),
     }
 }
 
@@ -108,10 +108,9 @@ fn record_is_better(candidate: &WorkRecord, existing: &WorkRecord) -> bool {
         .cmp(&existing.parts.len())
         .then_with(|| {
             candidate
-                .text
-                .combined
+                .combined_text()
                 .len()
-                .cmp(&existing.text.combined.len())
+                .cmp(&existing.combined_text().len())
         })
         .then_with(|| candidate.time.primary_at().cmp(&existing.time.primary_at()))
         .is_gt()
@@ -124,7 +123,7 @@ fn normalize_session_display_ids(records: &mut [WorkRecord]) {
         let Some(canonical_id) = record.session.canonical_id.as_deref() else {
             continue;
         };
-        let source_key = session_source_key(&record.session.work_ref);
+        let source_key = session_source_key(&record.work_ref);
         let sessions = source_sessions.entry(source_key).or_default();
         if !sessions.iter().any(|existing| existing == canonical_id) {
             sessions.push(canonical_id.to_string());
@@ -135,7 +134,7 @@ fn normalize_session_display_ids(records: &mut [WorkRecord]) {
         let Some(canonical_id) = record.session.canonical_id.as_deref() else {
             continue;
         };
-        let source_key = session_source_key(&record.session.work_ref);
+        let source_key = session_source_key(&record.work_ref);
         let Some(all_sessions) = source_sessions.get(&source_key) else {
             continue;
         };
@@ -178,7 +177,7 @@ fn prefix_chars(value: &str, len: usize) -> String {
 
 fn rewrite_record_session_display_id(record: &mut WorkRecord, display_id: &str) {
     record.session.id = display_id.to_string();
-    record.session.work_ref = match &record.session.work_ref {
+    record.work_ref = match &record.work_ref {
         WorkRef::Terminal { record_index, .. } => {
             WorkRef::terminal_record(display_id, *record_index)
         }
@@ -188,15 +187,14 @@ fn rewrite_record_session_display_id(record: &mut WorkRecord, display_id: &str) 
             ..
         } => WorkRef::agent_record(*provider, display_id, *turn_index),
     };
-    record.id = record.session.work_ref.to_string();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkChannel, WorkOutcome, WorkPayload, WorkRecordKind, WorkSessionRef, WorkSource,
-        WorkStatus, WorkText, WorkTime,
+        WorkChannel, WorkPart, WorkPartIo, WorkPartKind, WorkRecordKind, WorkSessionRef,
+        WorkSource, WorkTime,
     };
 
     #[test]
@@ -210,7 +208,7 @@ mod tests {
         normalize_session_display_ids(&mut records);
 
         assert_eq!(records[0].session.id, "abcdef12");
-        assert_eq!(records[0].id, "codex/abcdef12/1");
+        assert_eq!(records[0].work_ref.to_string(), "codex/abcdef12/1");
     }
 
     #[test]
@@ -231,9 +229,9 @@ mod tests {
         normalize_session_display_ids(&mut records);
 
         assert_eq!(records[0].session.id, "abcdef123");
-        assert_eq!(records[0].id, "codex/abcdef123/1");
+        assert_eq!(records[0].work_ref.to_string(), "codex/abcdef123/1");
         assert_eq!(records[1].session.id, "abcdef129");
-        assert_eq!(records[1].id, "codex/abcdef129/2");
+        assert_eq!(records[1].work_ref.to_string(), "codex/abcdef129/2");
     }
 
     #[test]
@@ -271,12 +269,10 @@ mod tests {
                 Some("session-0123456789abcdef"),
             ),
         ];
-        records[1].text.output = Some("assistant with more detail".to_string());
-        records[1].text.combined = "user\nassistant with more detail".to_string();
         records[1].parts.push(sivtr_core::record::WorkPart {
             io: sivtr_core::record::WorkPartIo::Output,
             kind: sivtr_core::record::WorkPartKind::AssistantMessage,
-            index_in_record: 1,
+            index: 1,
             occurred_at: None,
             label: Some("assistant".to_string()),
             text: "assistant with more detail".to_string(),
@@ -286,10 +282,10 @@ mod tests {
         dedup_records(&mut records);
 
         assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].text.output.as_deref(),
-            Some("assistant with more detail")
-        );
+        assert!(records[0]
+            .parts
+            .iter()
+            .any(|part| part.text == "assistant with more detail"));
         assert_eq!(records[0].session.id, "session-01234567");
     }
 
@@ -297,7 +293,6 @@ mod tests {
         WorkRecord {
             schema_version: 1,
             work_ref: work_ref.clone(),
-            id: work_ref.to_string(),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
                 channel: WorkChannel::Chat,
@@ -307,27 +302,31 @@ mod tests {
                 id: display_id.to_string(),
                 canonical_id: canonical_id.map(str::to_string),
                 path: None,
-                index: 0,
-                work_ref,
             },
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "title".to_string(),
-            text: WorkText {
-                input: Some("user".to_string()),
-                output: Some("assistant".to_string()),
-                combined: "user\nassistant".to_string(),
-            },
-            parts: Vec::new(),
-            payload: WorkPayload::ChatTurn {
-                user: "user".to_string(),
-                assistant: "assistant".to_string(),
-                messages: Vec::new(),
-            },
+            parts: vec![
+                WorkPart {
+                    io: WorkPartIo::Input,
+                    kind: WorkPartKind::UserMessage,
+                    index: 1,
+                    occurred_at: None,
+                    label: None,
+                    text: "user".to_string(),
+                    ansi: None,
+                },
+                WorkPart {
+                    io: WorkPartIo::Output,
+                    kind: WorkPartKind::AssistantMessage,
+                    index: 1,
+                    occurred_at: None,
+                    label: None,
+                    text: "assistant".to_string(),
+                    ansi: None,
+                },
+            ],
         }
     }
 }

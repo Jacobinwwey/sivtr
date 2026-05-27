@@ -325,7 +325,6 @@ pub fn execute_ref(
 fn ref_text_pair(record: &WorkRecord, work_ref: &WorkRef, input_ref: &str) -> Result<TextPair> {
     let plain = record
         .content_for_target(work_ref.target())
-        .map(str::to_string)
         .with_context(|| missing_ref_content_message(work_ref, input_ref))?;
     Ok(TextPair {
         ansi: plain.clone(),
@@ -1320,9 +1319,8 @@ mod tests {
     use anyhow::Result;
     use sivtr_core::ai::AgentBlock;
     use sivtr_core::record::{
-        RecordTextMode, WorkChannel, WorkOutcome, WorkPart, WorkPartIo, WorkPartKind, WorkPayload,
-        WorkRecord, WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkStatus, WorkText,
-        WorkTime,
+        RecordTextMode, WorkChannel, WorkPart, WorkPartIo, WorkPartKind, WorkRecord,
+        WorkRecordKind, WorkRef, WorkSessionRef, WorkSource, WorkTime,
     };
     use sivtr_core::session::SessionEntry;
     use std::collections::HashMap;
@@ -1405,11 +1403,7 @@ mod tests {
     #[test]
     fn resolves_ref_text_for_part_refs_emitted_by_work_parts() {
         let record = test_record();
-        let reference_text = record
-            .session
-            .work_ref
-            .with_part(WorkPartIo::Output, 1)
-            .to_string();
+        let reference_text = record.work_ref.with_part(WorkPartIo::Output, 1).to_string();
         let reference: WorkRef = reference_text.parse().unwrap();
 
         let text = ref_text_pair(&record, &reference, &reference_text).unwrap();
@@ -1491,7 +1485,6 @@ mod tests {
     fn test_record() -> WorkRecord {
         WorkRecord {
             schema_version: 1,
-            id: "codex/session/1".to_string(),
             work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
@@ -1502,26 +1495,16 @@ mod tests {
                 id: "session".to_string(),
                 canonical_id: Some("session-0123456789abcdef".to_string()),
                 path: None,
-                index: 1,
-                work_ref: WorkRef::agent_record(AgentProvider::Codex, "session", 1),
             },
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "title".to_string(),
-            text: WorkText {
-                input: Some("user".to_string()),
-                output: Some("ok".to_string()),
-                combined: "user\nok".to_string(),
-            },
             parts: vec![
                 WorkPart {
                     io: WorkPartIo::Input,
                     kind: WorkPartKind::UserMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: None,
                     label: Some("user".to_string()),
                     text: "user".to_string(),
@@ -1530,18 +1513,13 @@ mod tests {
                 WorkPart {
                     io: WorkPartIo::Output,
                     kind: WorkPartKind::AssistantMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: None,
                     label: Some("assistant".to_string()),
                     text: "ok".to_string(),
                     ansi: None,
                 },
             ],
-            payload: WorkPayload::ChatTurn {
-                user: "user".to_string(),
-                assistant: "ok".to_string(),
-                messages: Vec::new(),
-            },
         }
     }
 

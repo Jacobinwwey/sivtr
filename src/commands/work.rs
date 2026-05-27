@@ -225,10 +225,10 @@ fn build_session_items(records: &[WorkRecord]) -> Vec<WorkSessionListItem> {
 fn record_item(record: &WorkRecord) -> WorkRecordListItem {
     let (input_parts, output_parts) = part_counts(record);
     WorkRecordListItem {
-        ref_: record.session.work_ref.to_string(),
+        ref_: record.work_ref.to_string(),
         kind: record.kind_label().to_string(),
         session: session_meta(record),
-        target: target_meta(record, record.session.work_ref.target()),
+        target: target_meta(record, record.work_ref.target()),
         timestamp: record.time.primary_at().map(str::to_string),
         input_parts,
         output_parts,
@@ -251,23 +251,15 @@ fn build_part_items(record: &WorkRecord, io: WorkPartFilterArg) -> Vec<WorkPartL
         .iter()
         .filter(|part| io.matches(part.io))
         .map(|part| WorkPartListItem {
-            ref_: record
-                .session
-                .work_ref
-                .with_part(part.io, part.index_in_record)
-                .to_string(),
+            ref_: record.work_ref.with_part(part.io, part.index).to_string(),
             session: session_meta(record),
             target: target_meta(
                 record,
-                record
-                    .session
-                    .work_ref
-                    .with_part(part.io, part.index_in_record)
-                    .target(),
+                record.work_ref.with_part(part.io, part.index).target(),
             ),
             io: part.io,
             kind: part.kind,
-            index: part.index_in_record,
+            index: part.index,
             timestamp: part.occurred_at.clone(),
             label: part.label.clone(),
             summary: summary_text(&part.text),
@@ -377,7 +369,7 @@ fn kind_name(kind: WorkPartKind) -> &'static str {
 
 impl WorkSessionMarker {
     fn from_record(record: &WorkRecord) -> Self {
-        match &record.session.work_ref {
+        match &record.work_ref {
             WorkRef::Terminal { session, .. } => Self {
                 source: WorkSessionSource::Terminal,
                 session: session.clone(),
@@ -454,8 +446,7 @@ impl std::str::FromStr for WorkSessionMarker {
 mod tests {
     use super::*;
     use sivtr_core::record::{
-        WorkChannel, WorkOutcome, WorkPart, WorkPayload, WorkRecordKind, WorkSessionRef,
-        WorkSource, WorkStatus, WorkText, WorkTime,
+        WorkChannel, WorkPart, WorkRecordKind, WorkSessionRef, WorkSource, WorkTime,
     };
 
     #[test]
@@ -554,7 +545,6 @@ mod tests {
         let work_ref: WorkRef = ref_id.parse().unwrap();
         WorkRecord {
             schema_version: 1,
-            id: ref_id.to_string(),
             kind: WorkRecordKind::ChatTurn,
             work_ref: work_ref.clone(),
             source: WorkSource {
@@ -565,8 +555,6 @@ mod tests {
                 id: "alpha".to_string(),
                 canonical_id: Some("alpha-session-0123456789abcdef".to_string()),
                 path: None,
-                index: 1,
-                work_ref,
             },
             cwd: None,
             time: WorkTime {
@@ -574,21 +562,13 @@ mod tests {
                 ended_at: timestamp.map(str::to_string),
                 duration_ms: None,
             },
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: title.to_string(),
-            text: WorkText {
-                input: Some("user prompt".to_string()),
-                output: Some("assistant reply".to_string()),
-                combined: "user prompt\nassistant reply".to_string(),
-            },
             parts: vec![
                 WorkPart {
                     io: WorkPartIo::Input,
                     kind: WorkPartKind::UserMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: timestamp.map(str::to_string),
                     label: Some("user".to_string()),
                     text: "user prompt".to_string(),
@@ -597,18 +577,13 @@ mod tests {
                 WorkPart {
                     io: WorkPartIo::Output,
                     kind: WorkPartKind::AssistantMessage,
-                    index_in_record: 1,
+                    index: 1,
                     occurred_at: timestamp.map(str::to_string),
                     label: Some("assistant".to_string()),
                     text: "assistant reply".to_string(),
                     ansi: None,
                 },
             ],
-            payload: WorkPayload::ChatTurn {
-                user: "user prompt".to_string(),
-                assistant: "assistant reply".to_string(),
-                messages: Vec::new(),
-            },
         }
     }
 }

@@ -10,11 +10,11 @@ pub enum WorkRecordSearchScope {
     Session,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct WorkRecordMatch<'a> {
     pub record: &'a WorkRecord,
     pub target: WorkRefTarget,
-    pub content: &'a str,
+    pub content: String,
     pub matched_line: usize,
 }
 
@@ -61,7 +61,7 @@ impl WorkRecordIndex {
                     regex.is_match(&record.title).then_some(WorkRecordMatch {
                         record,
                         target: WorkRefTarget::Record,
-                        content: record.title.as_str(),
+                        content: record.title.clone(),
                         matched_line: 1,
                     })
                 }
@@ -112,9 +112,9 @@ fn matching_parts<'a>(record: &'a WorkRecord, regex: &Regex) -> Vec<WorkRecordMa
                     record,
                     target: WorkRefTarget::Part {
                         io: part.io,
-                        index: part.index_in_record,
+                        index: part.index,
                     },
-                    content: line,
+                    content: line.to_string(),
                     matched_line: line_index + 1,
                 })
                 .collect::<Vec<_>>()
@@ -124,15 +124,14 @@ fn matching_parts<'a>(record: &'a WorkRecord, regex: &Regex) -> Vec<WorkRecordMa
 
 fn matching_lines<'a>(record: &'a WorkRecord, regex: &Regex) -> Vec<WorkRecordMatch<'a>> {
     record
-        .text
-        .combined
+        .combined_text()
         .lines()
         .enumerate()
         .filter(|(_, line)| regex.is_match(line))
         .map(|(line_index, line)| WorkRecordMatch {
             record,
             target: WorkRefTarget::Line(line_index + 1),
-            content: line,
+            content: line.to_string(),
             matched_line: line_index + 1,
         })
         .collect()
@@ -144,7 +143,7 @@ fn matching_session<'a>(record: &'a WorkRecord, regex: &Regex) -> Option<WorkRec
         return Some(WorkRecordMatch {
             record,
             target: WorkRefTarget::Record,
-            content: session_id,
+            content: session_id.to_string(),
             matched_line: 1,
         });
     }
@@ -155,16 +154,14 @@ fn find_part(record: &WorkRecord, io: WorkPartIo, index: usize) -> Option<&WorkP
     record
         .parts
         .iter()
-        .find(|part| part.io == io && part.index_in_record == index)
+        .find(|part| part.io == io && part.index == index)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ai::AgentProvider;
-    use crate::record::model::{
-        WorkOutcome, WorkPartKind, WorkPayload, WorkRecordKind, WorkStatus, WorkText, WorkTime,
-    };
+    use crate::record::model::{WorkOutcome, WorkPartKind, WorkRecordKind, WorkStatus, WorkTime};
 
     #[test]
     fn resolves_records_by_typed_ref() {
@@ -212,7 +209,6 @@ mod tests {
         let work_ref = WorkRef::agent_record(AgentProvider::Pi, session_id, turn_index);
         WorkRecord {
             schema_version: 1,
-            id: work_ref.to_string(),
             work_ref,
             kind: WorkRecordKind::ChatTurn,
             source: WorkSource {
@@ -223,27 +219,20 @@ mod tests {
                 id: session_id.to_string(),
                 canonical_id: Some(session_id.to_string()),
                 path: None,
-                index: turn_index - 1,
-                work_ref: WorkRef::agent_record(AgentProvider::Pi, session_id, turn_index),
             },
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
-                outcome: WorkOutcome::Unknown,
-                exit_code: None,
-            },
+            status: None,
             title: "title".to_string(),
-            text: WorkText {
-                input: None,
-                output: Some(combined.to_string()),
-                combined: combined.to_string(),
-            },
-            parts: Vec::new(),
-            payload: WorkPayload::ChatTurn {
-                user: String::new(),
-                assistant: combined.to_string(),
-                messages: Vec::new(),
-            },
+            parts: vec![WorkPart {
+                io: WorkPartIo::Output,
+                kind: WorkPartKind::AssistantMessage,
+                index: 1,
+                occurred_at: None,
+                label: None,
+                text: combined.to_string(),
+                ansi: None,
+            }],
         }
     }
 
@@ -257,7 +246,6 @@ mod tests {
         let work_ref = WorkRef::terminal_record(session_id, turn_index);
         WorkRecord {
             schema_version: 1,
-            id: work_ref.to_string(),
             work_ref,
             kind: WorkRecordKind::TerminalCommand,
             source: WorkSource {
@@ -268,37 +256,23 @@ mod tests {
                 id: session_id.to_string(),
                 canonical_id: Some(session_id.to_string()),
                 path: None,
-                index: turn_index - 1,
-                work_ref: WorkRef::terminal_record(session_id, turn_index),
             },
             cwd: None,
             time: WorkTime::default(),
-            status: WorkStatus {
+            status: Some(WorkStatus {
                 outcome: WorkOutcome::Success,
                 exit_code: Some(0),
-            },
+            }),
             title: "title".to_string(),
-            text: WorkText {
-                input: None,
-                output: Some(text.to_string()),
-                combined: text.to_string(),
-            },
             parts: vec![WorkPart {
                 io: WorkPartIo::Output,
                 kind: WorkPartKind::Text,
-                index_in_record: 1,
+                index: 1,
                 occurred_at: None,
                 label: None,
                 text: text.to_string(),
                 ansi: None,
             }],
-            payload: WorkPayload::TerminalCommand {
-                prompt: String::new(),
-                command: "cmd".to_string(),
-                output: text.to_string(),
-                prompt_ansi: None,
-                output_ansi: None,
-            },
         }
     }
 }
