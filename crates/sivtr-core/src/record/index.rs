@@ -208,11 +208,24 @@ mod tests {
         turn_index: usize,
         combined: &str,
     ) -> WorkRecord {
+        use crate::record::model::{WorkChannel, WorkSessionRef, WorkSource};
+        let work_ref = WorkRef::agent_record(AgentProvider::Pi, session_id, turn_index);
         WorkRecord {
             schema_version: 1,
-            work_ref: WorkRef::agent_record(AgentProvider::Pi, session_id, turn_index),
+            id: work_ref.to_string(),
+            work_ref,
             kind: WorkRecordKind::ChatTurn,
-            session_path: None,
+            source: WorkSource {
+                channel: WorkChannel::Chat,
+                provider: Some("pi".to_string()),
+            },
+            session: WorkSessionRef {
+                id: session_id.to_string(),
+                canonical_id: Some(session_id.to_string()),
+                path: None,
+                index: turn_index - 1,
+                work_ref: WorkRef::agent_record(AgentProvider::Pi, session_id, turn_index),
+            },
             cwd: None,
             time: WorkTime::default(),
             status: WorkStatus {
@@ -240,11 +253,24 @@ mod tests {
         turn_index: usize,
         text: &str,
     ) -> WorkRecord {
+        use crate::record::model::{WorkChannel, WorkSessionRef, WorkSource};
+        let work_ref = WorkRef::terminal_record(session_id, turn_index);
         WorkRecord {
             schema_version: 1,
-            work_ref: WorkRef::terminal_record(session_id, turn_index),
+            id: work_ref.to_string(),
+            work_ref,
             kind: WorkRecordKind::TerminalCommand,
-            session_path: None,
+            source: WorkSource {
+                channel: WorkChannel::Terminal,
+                provider: None,
+            },
+            session: WorkSessionRef {
+                id: session_id.to_string(),
+                canonical_id: Some(session_id.to_string()),
+                path: None,
+                index: turn_index - 1,
+                work_ref: WorkRef::terminal_record(session_id, turn_index),
+            },
             cwd: None,
             time: WorkTime::default(),
             status: WorkStatus {

@@ -91,6 +91,82 @@ pub enum WorkOutcome {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkChannel {
+    Terminal,
+    Chat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkSource {
+    pub channel: WorkChannel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkSessionRef {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub index: usize,
+    pub work_ref: WorkRef,
+}
+
+impl WorkSessionRef {
+    pub fn marker_ref(&self) -> String {
+        match &self.work_ref {
+            WorkRef::Terminal { session, .. } => format!("terminal/{session}"),
+            WorkRef::Agent {
+                provider, session, ..
+            } => format!("{}/{session}", provider.command_name()),
+        }
+    }
+
+    pub fn provider(&self) -> Option<AgentProvider> {
+        self.work_ref.provider()
+    }
+
+    pub fn matches_id(&self, value: &str) -> bool {
+        self.id == value || self.canonical_id.as_deref() == Some(value)
+    }
+
+    pub fn matches_record_ref(&self, reference: &WorkRef) -> bool {
+        let reference = reference.record_ref();
+        match (&self.work_ref, &reference) {
+            (
+                WorkRef::Terminal { record_index, .. },
+                WorkRef::Terminal {
+                    session,
+                    record_index: wanted_index,
+                    ..
+                },
+            ) => record_index == wanted_index && self.matches_id(session),
+            (
+                WorkRef::Agent {
+                    provider,
+                    turn_index,
+                    ..
+                },
+                WorkRef::Agent {
+                    provider: wanted_provider,
+                    session,
+                    turn_index: wanted_index,
+                    ..
+                },
+            ) => {
+                provider == wanted_provider
+                    && turn_index == wanted_index
+                    && self.matches_id(session)
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct WorkTime {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,10 +281,11 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkRecord {
     pub schema_version: u32,
+    pub id: String,
     pub work_ref: WorkRef,
     pub kind: WorkRecordKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_path: Option<String>,
+    pub source: WorkSource,
+    pub session: WorkSessionRef,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub time: WorkTime,
@@ -247,9 +324,20 @@ impl WorkRecord {
 
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
+            id: work_ref.to_string(),
             work_ref,
             kind: WorkRecordKind::TerminalCommand,
-            session_path: Some(session_path.display().to_string()),
+            source: WorkSource {
+                channel: WorkChannel::Terminal,
+                provider: None,
+            },
+            session: WorkSessionRef {
+                id: session_id.clone(),
+                canonical_id: Some(session_id.clone()),
+                path: Some(session_path.display().to_string()),
+                index,
+                work_ref: WorkRef::terminal_record(session_id, index + 1),
+            },
             cwd: non_empty(entry.cwd.clone()),
             time: WorkTime::from_components(None, entry.ended_at.clone(), entry.duration_ms),
             status: WorkStatus {
@@ -323,8 +411,9 @@ impl WorkRecord {
             return None;
         }
 
-        let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
-        let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
+        let session_ref_id = agent_session_ref_id(session.id.as_deref(), &session.path);
+        let canonical_id = agent_session_canonical_id(session.id.as_deref(), &session.path);
+        let work_ref = WorkRef::agent_record(provider, session_ref_id.clone(), index + 1);
         let title = if user.trim().is_empty() {
             title_preview(&assistant)
         } else {
@@ -336,9 +425,24 @@ impl WorkRecord {
 
         Some(Self {
             schema_version: RECORD_SCHEMA_VERSION,
+            id: work_ref.to_string(),
             work_ref,
             kind: WorkRecordKind::ChatTurn,
-            session_path: Some(session.path.display().to_string()),
+            source: WorkSource {
+                channel: WorkChannel::Chat,
+                provider: Some(provider.command_name().to_string()),
+            },
+            session: WorkSessionRef {
+                id: session_ref_id,
+                canonical_id,
+                path: Some(session.path.display().to_string()),
+                index,
+                work_ref: WorkRef::agent_record(
+                    provider,
+                    agent_session_ref_id(session.id.as_deref(), &session.path),
+                    index + 1,
+                ),
+            },
             cwd: non_empty(session.cwd.clone()),
             time: WorkTime::from_components(started_at, ended_at, None),
             status: WorkStatus {
@@ -625,8 +729,9 @@ fn selected_block_record(
 ) -> WorkRecord {
     let text = compact_skill_blocks(block.text.trim());
     let title = title_preview(&text);
-    let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
-    let work_ref = WorkRef::agent_record(provider, session_ref.clone(), index + 1);
+    let session_ref_id = agent_session_ref_id(session.id.as_deref(), &session.path);
+    let canonical_id = agent_session_canonical_id(session.id.as_deref(), &session.path);
+    let work_ref = WorkRef::agent_record(provider, session_ref_id.clone(), index + 1);
     let block_timestamp = block.timestamp.as_deref().and_then(normalize_timestamp);
     let (input, output) = match kind {
         AgentBlockKind::User => (Some(text.clone()), None),
@@ -636,9 +741,24 @@ fn selected_block_record(
 
     WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
+        id: work_ref.to_string(),
         work_ref,
         kind: WorkRecordKind::ChatTurn,
-        session_path: Some(session.path.display().to_string()),
+        source: WorkSource {
+            channel: WorkChannel::Chat,
+            provider: Some(provider.command_name().to_string()),
+        },
+        session: WorkSessionRef {
+            id: session_ref_id,
+            canonical_id,
+            path: Some(session.path.display().to_string()),
+            index,
+            work_ref: WorkRef::agent_record(
+                provider,
+                agent_session_ref_id(session.id.as_deref(), &session.path),
+                index + 1,
+            ),
+        },
         cwd: non_empty(session.cwd.clone()),
         time: WorkTime::from_components(block_timestamp.clone(), None, None),
         status: WorkStatus {
@@ -681,16 +801,32 @@ fn selected_group_record(
         return Vec::new();
     }
 
-    let session_ref = agent_session_ref_id(session.id.as_deref(), &session.path);
-    let work_ref = WorkRef::agent_record(provider, session_ref.clone(), 1);
+    let session_ref_id = agent_session_ref_id(session.id.as_deref(), &session.path);
+    let canonical_id = agent_session_canonical_id(session.id.as_deref(), &session.path);
+    let work_ref = WorkRef::agent_record(provider, session_ref_id.clone(), 1);
     let started_at = first_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
     let ended_at = last_timestamp(&blocks).and_then(|timestamp| normalize_timestamp(&timestamp));
     let parts = agent_parts(&blocks);
     vec![WorkRecord {
         schema_version: RECORD_SCHEMA_VERSION,
+        id: work_ref.to_string(),
         work_ref,
         kind: WorkRecordKind::ChatTurn,
-        session_path: Some(session.path.display().to_string()),
+        source: WorkSource {
+            channel: WorkChannel::Chat,
+            provider: Some(provider.command_name().to_string()),
+        },
+        session: WorkSessionRef {
+            id: session_ref_id,
+            canonical_id,
+            path: Some(session.path.display().to_string()),
+            index: 0,
+            work_ref: WorkRef::agent_record(
+                provider,
+                agent_session_ref_id(session.id.as_deref(), &session.path),
+                1,
+            ),
+        },
         cwd: non_empty(session.cwd.clone()),
         time: WorkTime::from_components(started_at, ended_at, None),
         status: WorkStatus {
@@ -799,6 +935,17 @@ fn agent_session_ref_id(id: Option<&str>, path: &Path) -> String {
                 .filter(|id| !id.is_empty())
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn agent_session_canonical_id(id: Option<&str>, path: &Path) -> Option<String> {
+    id.filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+                .filter(|id| !id.trim().is_empty())
+        })
 }
 
 fn short_id(id: &str) -> String {
