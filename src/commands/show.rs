@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use sivtr_core::record::{RecordTextMode, WorkRef, WorkRefSelector, WorkRefTarget};
+use sivtr_core::record::{WorkRef, WorkRefSelector, WorkRefTarget};
 
 use crate::cli::ShowArgs;
 use crate::commands::records::current_work_record_index;
@@ -58,7 +58,9 @@ pub fn execute(args: &ShowArgs) -> Result<()> {
         };
 
         for work_ref in line_refs {
-            let content = content_for_ref(record, &work_ref)
+            let content = record
+                .content_for_target(work_ref.target())
+                .map(str::to_string)
                 .with_context(|| format!("No content found for ref `{work_ref}`"))?;
             let display_ref = match work_ref.target() {
                 WorkRefTarget::Record => record.work_ref.with_target(work_ref.target()),
@@ -137,23 +139,6 @@ fn show_by_ref(args: &ShowArgs, cwd: &std::path::Path, work_ref: &WorkRef) -> Re
         println!();
     }
     Ok(())
-}
-
-fn content_for_ref(record: &sivtr_core::record::WorkRecord, work_ref: &WorkRef) -> Option<String> {
-    match work_ref.target() {
-        WorkRefTarget::Part { .. } => record
-            .content_for_target(work_ref.target())
-            .map(str::to_string),
-        _ => match work_ref.line() {
-            Some(line) => record
-                .copy_text(RecordTextMode::Combined, false)
-                .plain
-                .lines()
-                .nth(line - 1)
-                .map(str::to_string),
-            None => Some(record.copy_text(RecordTextMode::Combined, false).plain),
-        },
-    }
 }
 
 fn show_json_item(item: ShowItem) -> ShowJsonItem {
