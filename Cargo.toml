@@ -19,6 +19,14 @@ repository.workspace = true
 description = "Terminal output workspace for the AI era - capture, sift, browse, search, select, and reuse terminal output and AI coding sessions"
 keywords = ["terminal", "cli", "tui", "codex", "ai"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    "/docs-site/public/demo/**",
+    "/docs-site/dist/**",
+    "/docs-site/node_modules/**",
+    "/editors/vscode/node_modules/**",
+    "/editors/vscode/out/**",
+    "/editors/vscode/*.vsix",
+]
 default-run = "sivtr"
 
 [[bin]]
