@@ -43,6 +43,9 @@ fn run() -> Result<()> {
         Some(Commands::Search(args)) => {
             commands::search::execute(&args)?;
         }
+        Some(Commands::Zoom(args)) => {
+            commands::zoom::execute(&args)?;
+        }
         Some(Commands::Work(cmd)) => {
             commands::work::execute(&cmd)?;
         }

@@ -21,3 +21,5 @@ pub mod time_filter;
 pub mod version;
 pub mod work;
 pub mod work_json;
+pub mod workset;
+pub mod zoom;

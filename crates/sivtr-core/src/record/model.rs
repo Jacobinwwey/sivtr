@@ -5,7 +5,7 @@ use crate::ai::{
 };
 use crate::session::SessionEntry;
 use crate::time::{derive_ended_at, derive_started_at, duration_between_ms, normalize_timestamp};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,14 +76,14 @@ impl WorkRecordCopyParts {
 
 pub const RECORD_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkRecordKind {
     TerminalCommand,
     ChatTurn,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkOutcome {
     Success,
@@ -91,21 +91,21 @@ pub enum WorkOutcome {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkChannel {
     Terminal,
     Chat,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkSource {
     pub channel: WorkChannel,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkSessionRef {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,7 +120,7 @@ impl WorkSessionRef {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkTime {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
@@ -153,21 +153,21 @@ impl WorkTime {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkStatus {
     pub outcome: WorkOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkPartIo {
     Input,
     Output,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkPartKind {
     Prompt,
@@ -180,7 +180,7 @@ pub enum WorkPartKind {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkPart {
     pub io: WorkPartIo,
     pub kind: WorkPartKind,
@@ -194,7 +194,7 @@ pub struct WorkPart {
     pub ansi: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkRecord {
     pub schema_version: u32,
     pub work_ref: WorkRef,

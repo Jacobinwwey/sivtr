@@ -4,6 +4,8 @@ use sivtr_core::ai::AgentProvider;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use crate::commands::show::WorkSetOutputFormat;
+
 pub(crate) const TIME_FILTER_HELP: &str = "Accepts RFC3339 timestamps, Unix seconds/milliseconds, relative durations like 30m, 2h, 7d, or aliases like today, yesterday, tomorrow, this morning, this afternoon, this evening, tonight, and now.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -177,45 +179,6 @@ impl FromStr for WorkPartFilterArg {
 impl std::fmt::Display for WorkPartFilterArg {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SearchOutputFormatArg {
-    Compact,
-    Timeline,
-    Md,
-    Refs,
-    #[default]
-    Json,
-}
-
-impl FromStr for SearchOutputFormatArg {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.to_ascii_lowercase().as_str() {
-            "compact" => Ok(Self::Compact),
-            "timeline" => Ok(Self::Timeline),
-            "md" | "markdown" => Ok(Self::Md),
-            "refs" => Ok(Self::Refs),
-            "json" => Ok(Self::Json),
-            _ => Err(format!(
-                "unknown search format `{value}`; expected timeline, compact, md, refs, or json"
-            )),
-        }
-    }
-}
-
-impl std::fmt::Display for SearchOutputFormatArg {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Compact => "compact",
-            Self::Timeline => "timeline",
-            Self::Md => "md",
-            Self::Refs => "refs",
-            Self::Json => "json",
-        })
     }
 }
 
@@ -483,6 +446,19 @@ Examples:
   sivtr diff 2 1 --side-by-side
 ";
 
+const ZOOM_AFTER_HELP: &str = "\
+Examples:
+  sivtr zoom
+  sivtr zoom @last -C 3
+  sivtr zoom @panics --before 5 --after 1 --save ctx
+  sivtr zoom terminal/session_1/12 -C 2 -f timeline
+
+Behavior:
+  Expands each target WorkRecord with neighboring records from the same session.
+  Target defaults to @last. WorkSet item selectors are 1-based, e.g. @last[1], @last[1..5], or @last[1,3,8].
+  --context sets both sides; --before and --after override the corresponding side.
+";
+
 const SEARCH_AFTER_HELP: &str = r##"
 Target selectors:
   terminal[/<session>[/<record>[/<line>]]]  Search terminal command records
@@ -505,13 +481,14 @@ Filters:
   --latest <n>          Return the latest n matching records
   --exclude-current     Exclude the current agent session from agent searches
   --other               Alias for --exclude-current
-  --json                Alias for --format json
+  --json                Alias for --format workset
   --refs                Alias for --format refs
-  --format <format>    Output format: timeline, compact, md, refs, or json
+  --format <format>    WorkSet output format: timeline, compact, md, refs, or workset
+  --save <name>        Save the result WorkSet as @name
 
-Pipelines:
-  If stdin is piped into `sivtr search`, it must be JSON output from a previous search.
-  Leave intermediate searches on the default JSON format, then choose the display format on the final search.
+WorkSets:
+  Every search creates a WorkSet, saves it as @last, and prints it in the selected output form.
+  Use @name as a search target to refine a saved WorkSet.
 
 Notes:
   Content hits may return structured refs such as `.../i/<n>` or `.../o/<n>`
@@ -520,11 +497,12 @@ Notes:
 Examples:
   sivtr search terminal --status failure --latest 1 --json
   sivtr s terminal --status fail -m "panic|failed" -v "example|sample" --latest 20 --refs
-  sivtr s terminal -m "panic|failed" | sivtr s terminal -v "demo" -i title -f timeline
+  sivtr s terminal -m "panic|failed" --save panics
+  sivtr s @panics -v "demo" -i title -f timeline
   sivtr search pi --match "merge|conflict" --latest 20 --format timeline
   sivtr search pi/019e5941 --match "cargo test" --format md
-  sivtr search pi/019e5941/7 --format json
-  sivtr search terminal/session_13104/3/12 --format json
+  sivtr search pi/019e5941/7 --format workset
+  sivtr search terminal/session_13104/3/12 --format workset
 "##;
 
 const WORK_SESSIONS_AFTER_HELP: &str = "\
@@ -618,6 +596,10 @@ pub enum Commands {
     /// Search captured terminal and AI workspace sessions
     #[command(visible_alias = "s", after_help = SEARCH_AFTER_HELP)]
     Search(SearchArgs),
+
+    /// Expand each target WorkRecord with neighboring records from the same session
+    #[command(after_help = ZOOM_AFTER_HELP)]
+    Zoom(ZoomArgs),
 
     /// Traverse workspace sessions, records, and parts without printing full content
     Work(WorkCommand),
@@ -848,8 +830,9 @@ pub struct DiffArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct SearchArgs {
-    /// Search target, e.g. terminal, agent, pi, pi/<session>/<turn>, or terminal/<session>/<record>
-    pub target: String,
+    /// Source selector, e.g. terminal, agent, pi, pi/<session>/<turn>, terminal/<session>/<record>, @last, or @ctx[1,3]
+    #[arg(value_name = "SOURCE")]
+    pub source: String,
 
     /// Case-insensitive regex content filter
     #[arg(short = 'm', long = "match", value_name = "REGEX")]
@@ -911,30 +894,88 @@ pub struct SearchArgs {
     #[arg(long = "exclude-current", alias = "other")]
     pub exclude_current: bool,
 
-    /// Output format: timeline, compact, md, refs, or json
-    #[arg(short = 'f', long, default_value_t = SearchOutputFormatArg::default(), value_name = "FORMAT")]
-    pub format: SearchOutputFormatArg,
+    /// WorkSet output format: full, timeline, compact, md, refs, or workset.
+    /// Defaults to full when stdout is a terminal and workset when piped.
+    #[arg(short = 'f', long, value_name = "FORMAT")]
+    pub format: Option<WorkSetOutputFormat>,
 
-    /// Alias for --format json
+    /// Alias for --format workset
     #[arg(long, conflicts_with = "format")]
     pub json: bool,
 
     /// Alias for --format refs
     #[arg(long, conflicts_with_all = ["format", "json"])]
     pub refs: bool,
+
+    /// Save the result WorkSet as @name
+    #[arg(long, value_name = "NAME")]
+    pub save: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ShowArgs {
-    /// Ref to show, for example `pi/019e4f40/3`, `pi/019e4f40/3/o/1`, or `terminal/current/12/8`.
-    pub reference: String,
+pub struct ZoomArgs {
+    /// Source WorkSet reference or WorkRef. Defaults to @last.
+    #[arg(default_value = "@last")]
+    pub source: String,
+
+    /// Set both --before and --after.
+    #[arg(short = 'C', long, value_name = "N")]
+    pub context: Option<usize>,
+
+    /// Records before each target record.
+    #[arg(long, value_name = "N")]
+    pub before: Option<usize>,
+
+    /// Records after each target record.
+    #[arg(long, value_name = "N")]
+    pub after: Option<usize>,
 
     /// Workspace directory used to resolve current AI sessions
     #[arg(long, value_name = "PATH")]
     pub cwd: Option<PathBuf>,
 
-    /// Print machine-readable JSON
-    #[arg(long)]
+    /// WorkSet output format: full, timeline, compact, md, refs, or workset.
+    /// Defaults to full when stdout is a terminal and workset when piped.
+    #[arg(short = 'f', long, value_name = "FORMAT")]
+    pub format: Option<WorkSetOutputFormat>,
+
+    /// Alias for --format workset
+    #[arg(long, conflicts_with = "format")]
+    pub json: bool,
+
+    /// Alias for --format refs
+    #[arg(long, conflicts_with_all = ["format", "json"])]
+    pub refs: bool,
+
+    /// Save the result WorkSet as @name
+    #[arg(long, value_name = "NAME")]
+    pub save: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ShowArgs {
+    /// Source ref or WorkSet reference to show, for example `pi/019e4f40/3`, `terminal/current/12/8`, `@last`, or `@ctx[1,3]`.
+    #[arg(value_name = "SOURCE")]
+    pub source: String,
+
+    /// Workspace directory used to resolve current AI sessions
+    #[arg(long, value_name = "PATH")]
+    pub cwd: Option<PathBuf>,
+
+    /// WorkSet output format: full, timeline, compact, md, refs, or workset
+    #[arg(short = 'f', long, value_name = "FORMAT")]
+    pub format: Option<WorkSetOutputFormat>,
+
+    /// Alias for --format full
+    #[arg(long, conflicts_with_all = ["format", "refs", "json"])]
+    pub full: bool,
+
+    /// Alias for --format refs
+    #[arg(long, conflicts_with_all = ["format", "full", "json"])]
+    pub refs: bool,
+
+    /// Alias for --format workset
+    #[arg(long, conflicts_with = "format")]
     pub json: bool,
 }
 
@@ -1493,7 +1534,7 @@ mod tests {
 
         match cli.command {
             Some(Commands::Search(args)) => {
-                assert_eq!(args.target, "pi/019e5941");
+                assert_eq!(args.source, "pi/019e5941");
                 assert_eq!(args.match_.as_deref(), Some("workspace picker"));
                 assert_eq!(args.exclude.as_deref(), None);
                 assert_eq!(args.in_field, SearchFieldArg::Title);
@@ -1502,7 +1543,7 @@ mod tests {
                 assert_eq!(args.min_duration, None);
                 assert_eq!(args.max_duration, None);
                 assert_eq!(args.sort, SearchSortArg::Newest);
-                assert_eq!(args.format, SearchOutputFormatArg::Timeline);
+                assert_eq!(args.format, Some(WorkSetOutputFormat::Timeline));
                 assert_eq!(args.limit, Some(5));
                 assert_eq!(args.since, None);
                 assert_eq!(args.until, None);
@@ -1514,6 +1555,129 @@ mod tests {
             }
             _ => panic!("expected search command"),
         }
+    }
+
+    #[test]
+    fn zoom_accepts_context_and_output_options() {
+        let cli = Cli::try_parse_from([
+            "sivtr",
+            "zoom",
+            "@panics[1..3,5]",
+            "-C",
+            "5",
+            "--after",
+            "1",
+            "--save",
+            "ctx",
+            "-f",
+            "timeline",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(Commands::Zoom(args)) => {
+                assert_eq!(args.source, "@panics[1..3,5]");
+                assert_eq!(args.context, Some(5));
+                assert_eq!(args.before, None);
+                assert_eq!(args.after, Some(1));
+                assert_eq!(args.save.as_deref(), Some("ctx"));
+                assert_eq!(args.format, Some(WorkSetOutputFormat::Timeline));
+            }
+            _ => panic!("expected zoom command"),
+        }
+    }
+
+    #[test]
+    fn zoom_defaults_to_last_workset() {
+        let cli = Cli::try_parse_from(["sivtr", "zoom"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Zoom(args)) => assert_eq!(args.source, "@last"),
+            _ => panic!("expected zoom command"),
+        }
+    }
+
+    #[test]
+    fn zoom_rejects_refs_alias_with_format_or_json() {
+        assert!(
+            Cli::try_parse_from(["sivtr", "zoom", "@last", "--refs", "--format", "timeline",])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["sivtr", "zoom", "@last", "--refs", "--json"]).is_err());
+    }
+
+    #[test]
+    fn show_accepts_workset_output_options() {
+        let cli = Cli::try_parse_from(["sivtr", "show", "@ctx[1,3]", "-f", "md"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Show(args)) => {
+                assert_eq!(args.source, "@ctx[1,3]");
+                assert_eq!(args.format, Some(WorkSetOutputFormat::Md));
+                assert!(!args.json);
+                assert!(!args.refs);
+                assert!(!args.full);
+            }
+            _ => panic!("expected show command"),
+        }
+    }
+
+    #[test]
+    fn show_accepts_refs_alias_for_worksets() {
+        let cli = Cli::try_parse_from(["sivtr", "show", "@last", "--refs"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Show(args)) => {
+                assert_eq!(args.source, "@last");
+                assert!(args.refs);
+            }
+            _ => panic!("expected show command"),
+        }
+    }
+
+    #[test]
+    fn show_accepts_full_for_any_target() {
+        let cli = Cli::try_parse_from(["sivtr", "show", "pi/019e6c57/17", "--full"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Show(args)) => {
+                assert_eq!(args.source, "pi/019e6c57/17");
+                assert!(args.full);
+            }
+            _ => panic!("expected show command"),
+        }
+    }
+
+    #[test]
+    fn show_accepts_full_format_for_any_target() {
+        let cli = Cli::try_parse_from(["sivtr", "show", "pi/019e6c57/17", "-f", "full"]).unwrap();
+
+        match cli.command {
+            Some(Commands::Show(args)) => {
+                assert_eq!(args.source, "pi/019e6c57/17");
+                assert_eq!(args.format, Some(WorkSetOutputFormat::Full));
+            }
+            _ => panic!("expected show command"),
+        }
+    }
+
+    #[test]
+    fn show_rejects_alias_conflicts() {
+        assert!(Cli::try_parse_from(["sivtr", "show", "@last", "--full", "--refs"]).is_err());
+        assert!(Cli::try_parse_from(["sivtr", "show", "@last", "--full", "--json"]).is_err());
+        assert!(
+            Cli::try_parse_from(["sivtr", "show", "@last", "--full", "--format", "timeline",])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn show_rejects_refs_alias_with_format_or_json() {
+        assert!(
+            Cli::try_parse_from(["sivtr", "show", "@last", "--refs", "--format", "timeline",])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["sivtr", "show", "@last", "--refs", "--json"]).is_err());
     }
 
     #[test]
@@ -1654,7 +1818,7 @@ mod tests {
         .unwrap();
 
         match cli.command {
-            Some(Commands::Search(args)) => assert_eq!(args.target, "terminal/session_1/3/2"),
+            Some(Commands::Search(args)) => assert_eq!(args.source, "terminal/session_1/3/2"),
             _ => panic!("expected search command"),
         }
     }
@@ -1666,7 +1830,7 @@ mod tests {
         match cli.command {
             Some(Commands::Search(args)) => {
                 assert!(args.json);
-                assert_eq!(args.format, SearchOutputFormatArg::Json);
+                assert_eq!(args.format, None);
             }
             _ => panic!("expected search command"),
         }
@@ -1687,7 +1851,7 @@ mod tests {
         match cli.command {
             Some(Commands::Search(args)) => {
                 assert!(args.refs);
-                assert_eq!(args.format, SearchOutputFormatArg::Json);
+                assert_eq!(args.format, None);
             }
             _ => panic!("expected search command"),
         }
@@ -1763,7 +1927,7 @@ mod tests {
                 assert_eq!(args.match_.as_deref(), Some("TODO|pending"));
                 assert_eq!(args.exclude.as_deref(), Some("example|示例"));
                 assert_eq!(args.in_field, SearchFieldArg::Title);
-                assert_eq!(args.format, SearchOutputFormatArg::Timeline);
+                assert_eq!(args.format, Some(WorkSetOutputFormat::Timeline));
             }
             _ => panic!("expected search command"),
         }

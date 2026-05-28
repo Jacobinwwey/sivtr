@@ -1,18 +1,29 @@
 # Command Cookbook
 
-Use these commands as starting points. This file is the single source for `sivtr` command syntax.
-Prefer small, targeted queries over dumping large histories.
+Use these commands as starting points. Prefer small, targeted queries over dumping large histories.
 
-## Search Commands
+## Core Model
 
-### Search option reference
+`search`, `zoom`, and `show` all take a source.
 
-`sivtr search` uses a target selector plus filters. The target decides where to
-search; filters decide which records match. Content search is a filter via
-`--match`.
+Source forms:
+
+- `terminal`: terminal command records
+- `agent`: AI/agent conversation records from all providers
+- `codex`, `claude`, `pi`, `opencode`: one provider's conversation records
+- `terminal/<session>/<record>/<line>` or `<provider>/<session>/<turn>/<line>` with optional trailing segments
+- `<provider>/<session>/<turn>/<i|o>/<part>` for input/output part refs
+- `@last`, `@name`, `@name[1]`, `@name[1,3]`, `@name[1..5]`, `@name[1..3,8]`
+- `@` to read a WorkSet from stdin
+
+WorkSet selector indexes are 1-based. Discrete selectors keep the requested order.
+
+## Search
+
+`search` filters records from a source and creates a WorkSet. Every search saves the result to `@last`; `--save <name>` also saves it as `@name`.
 
 ```bash
-sivtr s <target> \
+sivtr s <source> \
   -m <case-insensitive-regex> \
   -i <content|title|session|input|output|command|all> \
   -v <case-insensitive-regex> \
@@ -27,188 +38,182 @@ sivtr s <target> \
   --until <time> \
   --latest <n> \
   --limit <n> \
-  -f <timeline|compact|md|refs|json>
+  --save <name> \
+  -f <full|timeline|compact|md|refs|workset>
 ```
-
-Targets:
-
-- `terminal`: terminal command records.
-- `agent`: AI/agent conversation records from all providers.
-- `codex`, `claude`, `pi`, `opencode`: one provider's conversation records.
-- `terminal/<session>/<record>/<line>` or `<provider>/<session>/<turn>/<line>`:
-  ref-like narrowing. Trailing segments are optional. `*` means wildcard.
-- Record and line segments accept 1-based selectors: `3`, `3-5`, `3,7`, or
-  `3-5,7`. Use these selectors to narrow search scope; search results still
-  return concrete refs such as `pi/<session>/3/12`.
 
 Filters:
 
 - `-m` / `--match`: case-insensitive regex content filter.
-- `-v` / `--exclude`: case-insensitive regex exclusion filter on the same `-i`/`--in` search surface.
+- `-v` / `--exclude`: case-insensitive regex exclusion filter on the same `-i` / `--in` search surface.
 - `-i` / `--in`: field for `--match` and `--exclude`; default is `content`.
 - `--status`: filter by command/record outcome.
 - `--exit-code`: filter terminal records by exact process exit code.
 - `--min-duration` / `--max-duration`: filter by duration (`500ms`, `2s`, `1m`, `1h`).
 - `--sort`: sort results (`newest`, `oldest`, `duration`, `duration-asc`, `exit-code`, `exit-code-asc`).
-- `--cwd`: choose the workspace used to resolve current AI sessions. Omit it
-  when already running in the target repo.
+- `--cwd`: choose the workspace used to resolve current AI sessions.
 - `--last`: relative time window (`30m`, `2h`, `7d`).
-- `--since` / `--until`: bound search by RFC3339 time, Unix seconds/millis, or
-  relative durations.
+- `--since` / `--until`: bound search by RFC3339 time, Unix seconds/millis, or relative durations.
 - `--latest`: return the latest N matching records.
-- `--limit`: cap printed results; use when you want a display cap different
-  from `--latest`.
-- `-f` / `--format`: output view (`timeline`, `compact`, `md`, `refs`, or `json`). Prefer default JSON / `--json` when a program must parse fields; use the readable formats freely for agent reasoning, summaries, and handoffs.
+- `--limit`: cap printed results.
+- `--save`: name the result WorkSet.
 
-### General search
+Output formats:
 
-```bash
-sivtr s agent -m "<case-insensitive-regex>" --json --latest 20
-sivtr s terminal -m "<case-insensitive-regex>" --json --latest 20
-```
+- `full`: complete record content.
+- `timeline`: timestamp, provider/source, ref, and title.
+- `compact`: concise human-readable records.
+- `md`: markdown export.
+- `refs`: plain refs.
+- `workset`: WorkSet JSON.
+- `--json`: alias for `-f workset`.
+- `--refs`: alias for `-f refs`.
 
-### Search latest terminal errors
+Default output:
 
-For "最新终端报错" / "刚才终端报错", search terminal records directly, then expand the newest shell ref.
+- Terminal stdout: `full`.
+- Piped stdout: `workset`.
 
-```bash
-sivtr s terminal --status fail --json --latest 1
-```
-
-If status metadata is unavailable or too sparse, broaden with an error regex:
-
-```bash
-sivtr s terminal -m "Error|error|failed|fatal|panic|Traceback|Exception|exit code|not found|External command failed|No such file or directory|permission denied|is not recognized" --json --latest 20
-```
-
-If the returned ref ends with a line number, remove the trailing line segment and run `sivtr show "<block-ref>" --json` before answering.
-
-### Terminal metadata filters
+## General Search
 
 ```bash
-sivtr s terminal --status fail --json --latest 5
-sivtr s terminal --exit-code 101 --json --latest 20
-sivtr s terminal --min-duration 2s --sort duration --json --latest 20
+sivtr s agent -m "<case-insensitive-regex>" --latest 20 --refs
+sivtr s terminal -m "<case-insensitive-regex>" --latest 20 --refs
+sivtr show @last -f timeline
 ```
 
-### Search terminal + AI memory for common errors
+## Search Latest Terminal Errors
 
 ```bash
-sivtr s terminal -m "error|failed|panic|Traceback|Exception|exit code|could not compile|FAILED" --json --latest 20
-sivtr s agent -m "error|failed|panic|Traceback|Exception|exit code|could not compile|FAILED" --json --latest 20
+sivtr s terminal --status fail --latest 1 --refs
 ```
 
-### Rust failures
+If status metadata is sparse:
 
 ```bash
-sivtr s terminal -m "error\\[E[0-9]+\\]|panicked|test result: FAILED|could not compile|borrow|lifetime" --json --latest 20
+sivtr s terminal -m "Error|error|failed|fatal|panic|Traceback|Exception|exit code|not found|External command failed|No such file or directory|permission denied|is not recognized" --latest 20 --refs
 ```
 
-### JavaScript / TypeScript failures
+Expand the newest match:
 
 ```bash
-sivtr s terminal -m "TypeError|ReferenceError|TS[0-9]+|npm ERR|pnpm|vite|webpack|ELIFECYCLE|failed" --json --latest 20
+sivtr zoom @last[1] -C 2 --save error_ctx --refs
+sivtr show @error_ctx --full
 ```
 
-### Python failures
+## Terminal Metadata Filters
 
 ```bash
-sivtr s terminal -m "Traceback|ModuleNotFoundError|ImportError|AssertionError|pytest|FAILED|Exception" --json --latest 20
+sivtr s terminal --status fail --latest 5 --refs
+sivtr s terminal --exit-code 101 --latest 20 --refs
+sivtr s terminal --min-duration 2s --sort duration --latest 20 -f timeline
 ```
 
-### Previous decisions or AI discussion
+## Search Terminal + AI Memory for Common Errors
 
 ```bash
-sivtr s agent -m "lazy load|workspace TUI|metadata scan|decision|TODO|next step" --json --latest 20
+sivtr s terminal -m "error|failed|panic|Traceback|Exception|exit code|could not compile|FAILED" --latest 20 --refs
+sivtr s agent -m "error|failed|panic|Traceback|Exception|exit code|could not compile|FAILED" --latest 20 --refs
 ```
 
-### Search titles instead of content
+## Language Failure Queries
 
 ```bash
-sivtr s agent -m "workspace picker" -i session --json --latest 20
-sivtr s terminal -m "cargo test" -i title --json --latest 20
+sivtr s terminal -m "error\\[E[0-9]+\\]|panicked|test result: FAILED|could not compile|borrow|lifetime" --latest 20 --refs
+sivtr s terminal -m "TypeError|ReferenceError|TS[0-9]+|npm ERR|pnpm|vite|webpack|ELIFECYCLE|failed" --latest 20 --refs
+sivtr s terminal -m "Traceback|ModuleNotFoundError|ImportError|AssertionError|pytest|FAILED|Exception" --latest 20 --refs
 ```
 
-### Provider-specific search
+## Previous Decisions or AI Discussion
 
 ```bash
-sivtr s codex -m "<query>" --json --latest 20
-sivtr s claude -m "<query>" --json --latest 20
-sivtr s pi -m "<query>" --json --latest 20
-sivtr s opencode -m "<query>" --json --latest 20
+sivtr s agent -m "decision|TODO|next step|blocked|test result|passed|failed" --latest 20 --save history --refs
+sivtr s @history -m "<topic>" --save topic_history --refs
+sivtr zoom @topic_history[1] -C 2 --save topic_ctx --refs
+sivtr show @topic_ctx --full
 ```
 
-### Compose filters from the request
-
-Map request constraints to target selectors and filters instead of hard-coding
-scenario-specific queries. Keep `--match` for the content/topic being searched.
+## Search Titles Instead of Content
 
 ```bash
-sivtr s <provider> -m "<topic>" --last <duration> --json --latest 20
-sivtr s <provider> -m "<topic>|<related-term>|<status-term>" --last <duration> --json --latest 30
-sivtr s agent -m "<topic>" -i <content|title|session> --cwd <path> --json --latest 20
+sivtr s agent -m "workspace picker" -i session --latest 20 --refs
+sivtr s terminal -m "cargo test" -i title --latest 20 --refs
 ```
 
-Examples of the mapping:
+## Provider-Specific Search
 
-- "pi 中的 merge" -> target `pi`, match `merge`
-- "最近两小时的终端报错" -> target `terminal`, options `--status failure --last 2h`
-- "这个仓库上次的 CI 失败" -> target `terminal`, match `CI|failed`, option `--cwd <repo>`
-- "标题里有 workspace picker" -> target `agent`, match `workspace picker`, option `--in session` or `--in title`
+```bash
+sivtr s codex -m "<query>" --latest 20 --refs
+sivtr s claude -m "<query>" --latest 20 --refs
+sivtr s pi -m "<query>" --latest 20 --refs
+sivtr s opencode -m "<query>" --latest 20 --refs
+```
 
-## Chaining Searches
+## Compose Filters from the Request
 
-Search defaults to JSON, so intermediate pipeline stages should usually omit
-`-f`. A downstream `sivtr s ...` reads the previous search JSON from stdin and
-filters within those result refs. Choose the human display format only on the
-last stage.
+Map request constraints to source selectors and filters. Keep `--match` for the content/topic being searched.
+
+```bash
+sivtr s <provider> -m "<topic>" --last <duration> --latest 20 --refs
+sivtr s <provider> -m "<topic>|<related-term>|<status-term>" --last <duration> --latest 30 --refs
+sivtr s agent -m "<topic>" -i <content|title|session> --cwd <path> --latest 20 --refs
+```
+
+Examples:
+
+- "pi 中的 merge" -> source `pi`, match `merge`
+- "最近两小时的终端报错" -> source `terminal`, options `--status failure --last 2h`
+- "这个仓库上次的 CI 失败" -> source `terminal`, match `CI|failed`, option `--cwd <repo>`
+- "标题里有 workspace picker" -> source `agent`, match `workspace picker`, option `--in session` or `--in title`
+
+## Chaining WorkSets
+
+Pipeline chaining uses `@` as stdin source. Intermediate commands can omit `-f`; piped stdout emits WorkSet JSON automatically.
 
 ```bash
 sivtr s terminal --status fail -m "error|failed|拒绝访问" \
-  | sivtr s terminal -v "example|sample|sttop" -i title -f timeline
+  | sivtr s @ -v "example|sample|sttop" -i title \
+  | sivtr zoom @ -C 1 \
+  | sivtr show @ -f timeline
 ```
 
-Use `--refs` only when you explicitly want a plain ref list for humans, files,
-or non-sivtr tools.
-
-## Format Handling
-
-Search formats are interchangeable views over the same result set. Use default JSON / `--json` when you need structured fields; use `-f timeline`, `-f compact`, or `-f md` when the agent needs to reason over order, summarize work, or draft a handoff.
-
-`sivtr s --json` returns a wrapper with `target`, optional `match`,
-`field`, `cwd`, `count`, and `results`. Inspect these result fields first:
-
-- `ref`: stable reference for follow-up expansion
-- `timestamp`: how recent it is
-- `dialogue`: dialogue or command block title
-- `status`: `success`, `failure`, or `unknown`
-- `exit_code`: terminal process exit code when available
-- `duration_ms`: command/turn elapsed time when available
-
-Expected result item shape:
-
-```json
-{
-  "ref": "terminal/current/12/1",
-  "timestamp": "...",
-  "dialogue": "cargo test"
-}
-```
-
-Use `ref` for precise follow-up. Search output is intentionally compact; use
-`show` when you need exact content.
-
-## Expansion Commands
-
-Use expansion after search identifies a target. Prefer small, precise expansions.
-
-### Show a matched ref
-
-Use `show` when search returned a `ref` and you need exact content.
+Named WorkSets are useful for multi-step retrieval:
 
 ```bash
-sivtr show "<ref>" --json
-sivtr show "terminal/current/12/8" --json
+sivtr s agent -m "decision|TODO|next step" --latest 20 --save hits --refs
+sivtr s @hits -m "<topic>" --save narrowed --refs
+sivtr zoom @narrowed[1] -C 2 --save ctx --refs
+sivtr show @ctx --full
+```
+
+## Zoom
+
+`zoom` expands each source record to neighboring records in the same session and creates a new WorkSet.
+
+```bash
+sivtr zoom <source> -C <n> --save <name> --refs
+sivtr zoom @last[1] --before 3 --after 1 -f timeline
+sivtr zoom @ -C 2 | sivtr show @ --full
+```
+
+Options:
+
+- `-C` / `--context`: set both before and after.
+- `--before`: records before each source record.
+- `--after`: records after each source record.
+- `--save`: name the expanded WorkSet.
+
+## Show
+
+`show` displays any source.
+
+```bash
+sivtr show @last --full
+sivtr show @last[1,3] -f timeline
+sivtr show @ctx -f md
+sivtr show "terminal/current/12" --full
+sivtr show "pi/019e4f40/3" --full
+sivtr show "codex/abc123/2/o/1" --full
 ```
 
 Refs/selectors have this shape:
@@ -219,26 +224,14 @@ provider/session/dialogue[/line]
 provider/session/dialogue/<i|o>/<part>
 ```
 
-The `dialogue`/`line` segments may be concrete numbers or selector lists/ranges
-when used as command input, for example `3-5,7` or `5-7,10`. Output refs remain
-concrete anchors. Part refs use `i` (input) or `o` (output) followed by a 1-based
-part index.
-
-Examples:
-
-```bash
-sivtr show "terminal/current/12" --json
-sivtr show "pi/019e4f40/3" --json
-sivtr show "pi/019e4f40/3-5,7" --json
-sivtr show "pi/019e4f40/3/5-7,10" --json
-sivtr show "codex/abc123/2/o/1" --json
-```
+The `dialogue` / `line` segments may be concrete numbers or selector lists/ranges when used as command input, for example `3-5,7` or `5-7,10`. Output refs remain concrete anchors. Part refs use `i` (input) or `o` (output) followed by a 1-based part index.
 
 ## Token Budget
 
 - Start with `--latest 20`.
-- Expand at most 1-3 refs before answering unless the task requires a timeline.
-- Prefer exact refs over broad repeated searches.
+- Use `--refs` or `-f timeline` for first-pass inspection.
+- Expand at most 1-3 records before answering unless the task requires a timeline.
+- Prefer exact refs and WorkSet selectors over broad repeated searches.
 - If context is still missing after targeted search and expansion, ask the user.
 
 ## Copy by Ref
@@ -258,25 +251,25 @@ Supports `--print`, `--regex`, `--lines`, and `--cwd` options.
 Explore workspace records at session, record, and part granularity:
 
 ```bash
-sivtr work sessions --json              # List all sessions
-sivtr work records codex/019e4f40 --json # List records in a session
-sivtr work parts codex/019e4f40/3 --json # List parts in a record
-sivtr work parts codex/019e4f40/3 --io output --json  # Output parts only
+sivtr work sessions --json
+sivtr work records codex/019e4f40 --json
+sivtr work parts codex/019e4f40/3 --json
+sivtr work parts codex/019e4f40/3 --io output --json
 ```
 
-The `work` command provides canonical refs for every level. Use `--io all|input|output`
-to filter part listing.
+The `work` command provides canonical refs for every level. Use `--io all|input|output` to filter part listing.
 
 ## Diagnostics
 
 When `sivtr` commands fail or return no results, check the environment:
 
 ```bash
-sivtr doctor        # Check binary, config, session logs, hooks, providers, clipboard
-sivtr init show     # Show which shell hooks are installed
+sivtr doctor
+sivtr init show
 ```
 
 Common issues:
-- No terminal results → `sivtr init show` to verify hooks, then restart terminal
-- No provider results → `sivtr doctor` to check session discovery
-- Clipboard not working → `sivtr doctor` reports clipboard availability
+
+- No terminal results → `sivtr init show` to verify hooks, then restart terminal.
+- No provider results → `sivtr doctor` to check session discovery.
+- Clipboard not working → `sivtr doctor` reports clipboard availability.
