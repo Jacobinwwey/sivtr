@@ -30,29 +30,47 @@ Do not use Sivtr as truth by itself. Treat memory as evidence to retrieve, then 
 
 ## Default Retrieval Workflow
 
+Mental model to keep in mind:
+
+- A WorkSet is `records + anchors`: `records` are the materialized backing store; `anchors` are the active positions moving through search, work, zoom, and show.
+- Treat `@last` and `@name` as WorkSet variables. Use `--save <name>` whenever a result will be reused or refined.
+- Use `work records <source>` to project any anchor back to parent record anchors. Use `work parts <source>` to drill record anchors into part anchors.
+- In shell pipelines, `@` means "read the WorkSet JSON from stdin". Do not pipe `--refs` text into `@`; either omit `--refs` in intermediate commands or use `@last` / `@name`.
+
 1. Convert the user's vague reference into a small query.
-2. Choose a source: `terminal`, `agent`, `pi`, `codex`, `claude`, `opencode`, a WorkRef selector, or a WorkSet reference such as `@last` / `@name[1,3]`.
-3. Search with a small limit. Put content terms in `-m` / `--match`. Use `--last` / `--since` for time windows and `-i` / `--in` for field constraints.
-   - Latest terminal error: `sivtr s terminal --status fail --latest 1 --refs`
-   - Broader terminal error scan: `sivtr s terminal -m "Error|error|failed|fatal|not found|External command failed" --latest 20 --refs`
-4. Refine the current WorkSet when needed:
-   - `sivtr s @last -m "more specific terms" --refs`
-   - `sivtr s @last[1,3] -m "narrower terms" --refs`
-5. Expand only useful records:
-   - `sivtr zoom @last[1] -C 2 --save ctx --refs`
+2. Choose a source: `terminal`, `agent`, `pi`, `codex`, `claude`, `opencode`, a WorkRef selector, or a WorkSet variable such as `@last` / `@name[1,3]`.
+3. Search with a small limit. Put content terms in `-m` / `--match`. Use `--last` / `--since` for time windows, `-i` / `--in` for part candidate filters, and `--kind` for part kind filters.
+   - Latest terminal error: `sivtr s terminal --status fail --latest 1 --save latest_failure --refs`
+   - Broader terminal error scan: `sivtr s terminal -m "Error|error|failed|fatal|not found|External command failed" --latest 20 --save error_hits --refs`
+4. Save/refine WorkSet variables instead of re-running broad searches:
+   - `sivtr s @error_hits -m "more specific terms" --save narrowed --refs`
+   - `sivtr s @last[1,3] -m "narrower terms" --save focused --refs`
+5. Move anchors deliberately:
+   - Drill into parts: `sivtr work parts @focused --io output --kind tool_output --save output_parts --refs`
+   - Return to records: `sivtr work records @output_parts --save parent_records --refs`
+6. Expand only useful parent records:
+   - `sivtr zoom @focused[1] -C 2 --save ctx --refs`
    - `sivtr show @ctx --full`
    - `sivtr show <ref> --full`
-6. Answer with evidence, then verify current files or commands when the claim depends on present repository state.
-7. Ask the user only after local memory has been checked and still lacks the needed fact.
+7. Answer with evidence, then verify current files or commands when the claim depends on present repository state.
+8. Ask the user only after local memory has been checked and still lacks the needed fact.
 
 ## WorkSet Flow
 
-`search` and `zoom` create WorkSets. Each run saves the result to `@last`. Add `--save <name>` to keep a named WorkSet.
+`search`, `work records`, `work parts`, and `zoom` create WorkSets. Each run saves the result to `@last`. Add `--save <name>` to keep a named WorkSet variable.
+
+Core semantics:
+
+- `records` are backing facts/materialized context.
+- `anchors` are the active selection and the thing that moves through pipes.
+- `search` searches `WorkPart`s, then outputs anchors at the current input granularity.
+- `show` renders at anchor granularity: record anchors show records, part anchors show just that part, line anchors show just that line.
+- `zoom` maps any anchor to its parent record, then expands nearby records.
 
 Source forms:
 
 - `terminal`, `agent`, `pi`, `codex`, `claude`, `opencode`
-- `terminal/<session>/<record>`, `<provider>/<session>/<turn>`, and selector variants
+- `terminal/<session>/<record>`, `<provider>/<session>/<turn>`, `<provider>/<session>/<turn>/<i|o>/<part>`, and selector variants
 - `@last`, `@name`, `@name[1]`, `@name[1,3]`, `@name[1..5]`, `@name[1..3,8]`
 - `@` reads a WorkSet from stdin in shell pipelines
 
@@ -64,16 +82,25 @@ Output behavior:
 - `--refs` is `--format refs`.
 - `--full` on `show` is `--format full`.
 
-Pipeline example:
+Pipeline example (pipe WorkSet JSON; do not add `--refs` in intermediate steps):
 
 ```bash
-sivtr s agent -m "panic|failed" --latest 20 \
-  | sivtr s @ -m "cargo|test" \
-  | sivtr zoom @ -C 1 \
+sivtr s agent -m "panic|failed" --latest 20 --save failures \
+  | sivtr s @ -m "cargo|test" --save test_failures \
+  | sivtr zoom @ -C 1 --save failure_ctx \
   | sivtr show @ -f timeline
 ```
 
-Named WorkSet example:
+Anchor movement example:
+
+```bash
+sivtr s pi -m "git push|main -> main" --latest 10 --save push_hits --refs
+sivtr work parts @push_hits --io output --kind tool_output --save push_outputs --refs
+sivtr s @push_outputs -m "main -> main" --save exact_output --refs
+sivtr show @exact_output --full
+```
+
+Named WorkSet variable example:
 
 ```bash
 sivtr s agent -m "decision|TODO|next step" --latest 20 --save hits --refs
@@ -85,7 +112,7 @@ sivtr show @ctx --full
 ## Non-Interactive Safety Rules
 
 - Prefer non-interactive commands: `sivtr s ... --refs`, `sivtr s ... -f <timeline|compact|md>`, `sivtr show ... --full`, `sivtr show ... --json`.
-- Use WorkSet refs and `@` pipelines for chaining.
+- Use WorkSet variables (`@last`, `@name`) and `@` pipelines for chaining; save reusable intermediate sets with `--save <name>`.
 - Do not open TUI pickers (`--pick`, hotkey picker) unless the user explicitly wants interactive selection.
 - Do not run `sivtr clear`, hotkey start/stop, shell init, or config mutation unless the user explicitly asks.
 - Avoid clipboard-oriented workflows in agent retrieval. Use refs from `search` and expand them with `show` / `zoom`.
