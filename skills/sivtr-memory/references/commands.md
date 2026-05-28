@@ -4,7 +4,7 @@ Use these commands as starting points. Prefer small, targeted queries over dumpi
 
 ## Core Model
 
-`search`, `zoom`, and `show` all take a source.
+`search`, `zoom`, `show`, `work records`, and `work parts` all take a source.
 
 Source forms:
 
@@ -16,17 +16,24 @@ Source forms:
 - `@last`, `@name`, `@name[1]`, `@name[1,3]`, `@name[1..5]`, `@name[1..3,8]`
 - `@` to read a WorkSet from stdin
 
-WorkSet selector indexes are 1-based. Discrete selectors keep the requested order.
+WorkSets contain materialized `records` plus active `anchors`. Pipes move anchors; records are the backing store. WorkSet selector indexes are 1-based. Discrete selectors keep the requested order.
 
 ## Search
 
-`search` filters records from a source and creates a WorkSet. Every search saves the result to `@last`; `--save <name>` also saves it as `@name`.
+`search` filters parts from a source and creates a WorkSet. It searches `WorkPart`s, then emits anchors at the current source granularity:
+
+- record anchor in -> record anchor out
+- part anchor in -> part anchor out
+- line anchor in -> line anchor out
+
+Every search saves the result to `@last`; `--save <name>` also saves it as `@name`.
 
 ```bash
 sivtr s <source> \
   -m <case-insensitive-regex> \
   -i <content|title|session|input|output|command|all> \
   -v <case-insensitive-regex> \
+  --kind <prompt|command|user_message|assistant_message|tool_call|tool_output|text|error> \
   --status <success|failure|unknown|fail> \
   --exit-code <code> \
   --min-duration <duration> \
@@ -46,7 +53,8 @@ Filters:
 
 - `-m` / `--match`: case-insensitive regex content filter.
 - `-v` / `--exclude`: case-insensitive regex exclusion filter on the same `-i` / `--in` search surface.
-- `-i` / `--in`: field for `--match` and `--exclude`; default is `content`.
+- `-i` / `--in`: part candidate/search field for `--match` and `--exclude`; default is `content`. Use `input`, `output`, `command`, or `all` to constrain which parts are searched.
+- `--kind`: first-class part kind filter.
 - `--status`: filter by command/record outcome.
 - `--exit-code`: filter terminal records by exact process exit code.
 - `--min-duration` / `--max-duration`: filter by duration (`500ms`, `2s`, `1m`, `1h`).
@@ -54,13 +62,13 @@ Filters:
 - `--cwd`: choose the workspace used to resolve current AI sessions.
 - `--last`: relative time window (`30m`, `2h`, `7d`).
 - `--since` / `--until`: bound search by RFC3339 time, Unix seconds/millis, or relative durations.
-- `--latest`: return the latest N matching records.
+- `--latest`: return the latest N matching anchors.
 - `--limit`: cap printed results.
 - `--save`: name the result WorkSet.
 
 Output formats:
 
-- `full`: complete record content.
+- `full`: complete anchor content.
 - `timeline`: timestamp, provider/source, ref, and title.
 - `compact`: concise human-readable records.
 - `md`: markdown export.
@@ -177,6 +185,17 @@ sivtr s terminal --status fail -m "error|failed|拒绝访问" \
   | sivtr show @ -f timeline
 ```
 
+Show part-level output matches from the current WorkSet:
+
+```bash
+sivtr s pi -m "git push|main -> main" --latest 10 \
+  | sivtr work parts @ --io output --kind tool_output \
+  | sivtr s @ -m "main -> main" \
+  | sivtr show @ --full
+```
+
+If an intermediate command prints `--refs`, do not pipe that text into `@`; `@` expects WorkSet JSON from piped stdout. Use `@last` or omit `--refs` in pipelines.
+
 Named WorkSets are useful for multi-step retrieval:
 
 ```bash
@@ -188,7 +207,7 @@ sivtr show @ctx --full
 
 ## Zoom
 
-`zoom` expands each source record to neighboring records in the same session and creates a new WorkSet.
+`zoom` maps any source anchor to its parent record, expands to neighboring records in the same session, and creates a new WorkSet with record anchors.
 
 ```bash
 sivtr zoom <source> -C <n> --save <name> --refs
@@ -205,7 +224,7 @@ Options:
 
 ## Show
 
-`show` displays any source.
+`show` displays any source at anchor granularity: record anchors show records, part anchors show only that part, and line anchors show only that line.
 
 ```bash
 sivtr show @last --full
@@ -252,12 +271,13 @@ Explore workspace records at session, record, and part granularity:
 
 ```bash
 sivtr work sessions --json
-sivtr work records codex/019e4f40 --json
-sivtr work parts codex/019e4f40/3 --json
-sivtr work parts codex/019e4f40/3 --io output --json
+sivtr work records codex/019e4f40 --refs
+sivtr work records @last[1] --refs
+sivtr work parts codex/019e4f40/3 --io output --kind tool_output --refs
+sivtr work parts @ --io all --json
 ```
 
-The `work` command provides canonical refs for every level. Use `--io all|input|output` to filter part listing.
+`work records` projects any source anchors to parent record anchors. `work parts` projects source anchors to part anchors and supports `--io`, `--kind`, and `-m` / `--match` filtering.
 
 ## Diagnostics
 
@@ -270,6 +290,6 @@ sivtr init show
 
 Common issues:
 
-- No terminal results → `sivtr init show` to verify hooks, then restart terminal.
-- No provider results → `sivtr doctor` to check session discovery.
-- Clipboard not working → `sivtr doctor` reports clipboard availability.
+- No terminal results -> `sivtr init show` to verify hooks, then restart terminal.
+- No provider results -> `sivtr doctor` to check session discovery.
+- Clipboard not working -> `sivtr doctor` reports clipboard availability.
