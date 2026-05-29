@@ -57,7 +57,7 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
     }
 
     if args.semantic {
-        return execute_semantic_search(args, &cwd, &records);
+        return execute_semantic_search(args, &records);
     }
 
     let mut matches = anchors
@@ -507,7 +507,7 @@ fn comparable_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn execute_semantic_search(args: &SearchArgs, cwd: &Path, records: &[WorkRecord]) -> Result<()> {
+fn execute_semantic_search(args: &SearchArgs, records: &[WorkRecord]) -> Result<()> {
     let query = args
         .match_
         .as_deref()

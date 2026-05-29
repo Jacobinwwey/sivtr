@@ -3,7 +3,7 @@ use regex::Regex;
 use serde::Serialize;
 use sivtr_core::ai::AgentProvider;
 use sivtr_core::record::{
-    semantic_search, WorkLink, WorkLinkKind, WorkRecord, WorkRef, WorkRefTarget,
+    semantic_search, WorkLinkKind, WorkRecord, WorkRef, WorkRefTarget,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -270,7 +270,7 @@ fn execute_links(args: &WorkLinksArgs) -> Result<()> {
             "{}  →  {}  [{}]",
             link.from,
             link.to,
-            serde_json::to_value(&link.kind)
+            serde_json::to_value(link.kind)
                 .unwrap()
                 .as_str()
                 .unwrap_or("?")
