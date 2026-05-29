@@ -6,8 +6,8 @@ use chrono::Utc;
 use regex::Regex;
 use sivtr_core::ai::{AgentProvider, AgentSessionProvider};
 use sivtr_core::record::{
-    WorkOutcome, WorkPart, WorkPartIo, WorkPartKind, WorkRecord, WorkRecordKind, WorkRef,
-    WorkRefTarget,
+    semantic_search, WorkOutcome, WorkPart, WorkPartIo, WorkPartKind, WorkRecord, WorkRecordKind,
+    WorkRef, WorkRefTarget,
 };
 
 use crate::cli::{SearchArgs, SearchFieldArg, SearchSortArg, SearchStatusArg};
@@ -54,6 +54,10 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
         if min > max {
             bail!("--min-duration must be less than or equal to --max-duration");
         }
+    }
+
+    if args.semantic {
+        return execute_semantic_search(args, &cwd, &records);
     }
 
     let mut matches = anchors
@@ -501,6 +505,46 @@ fn excluded_session_matches(record: &WorkRecord, excluded_sessions: &HashSet<Pat
 
 fn comparable_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn execute_semantic_search(
+    args: &SearchArgs,
+    cwd: &Path,
+    records: &[WorkRecord],
+) -> Result<()> {
+    let query = args
+        .match_
+        .as_deref()
+        .context("--match is required with --semantic")?;
+    let limit = args.limit.or(args.latest).unwrap_or(20);
+    let results = semantic_search(records, query, limit, |_| true);
+    if args.json {
+        let json_results: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "ref": r.record_ref.to_string(),
+                    "score": r.score,
+                    "matched_terms": r.matched_terms,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&json_results)?);
+        return Ok(());
+    }
+    if results.is_empty() {
+        println!("No semantic matches for `{query}`");
+        return Ok(());
+    }
+    for result in &results {
+        println!(
+            "{}  score:{}  [{}]",
+            result.record_ref,
+            result.score,
+            result.matched_terms.join(", ")
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -2,12 +2,17 @@ use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Serialize;
 use sivtr_core::ai::AgentProvider;
-use sivtr_core::record::{WorkRecord, WorkRef, WorkRefTarget};
+use sivtr_core::record::{
+    semantic_search, WorkLink, WorkLinkKind, WorkRecord, WorkRef, WorkRefTarget,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use crate::cli::{WorkCommand, WorkPartsArgs, WorkRecordsArgs, WorkSessionsArgs};
+use crate::cli::{
+    WorkCommand, WorkLinksArgs, WorkPartsArgs, WorkRecordsArgs, WorkSemanticArgs,
+    WorkSessionsArgs,
+};
 use crate::commands::records::current_work_record_index;
 use crate::commands::show;
 use crate::commands::work_json::{session_meta, WorkJsonSessionMeta};
@@ -48,6 +53,8 @@ pub fn execute(command: &WorkCommand) -> Result<()> {
         crate::cli::WorkSubcommand::Sessions(args) => execute_sessions(args),
         crate::cli::WorkSubcommand::Records(args) => execute_records(args),
         crate::cli::WorkSubcommand::Parts(args) => execute_parts(args),
+        crate::cli::WorkSubcommand::Semantic(args) => execute_semantic(args),
+        crate::cli::WorkSubcommand::Links(args) => execute_links(args),
     }
 }
 
@@ -174,12 +181,104 @@ fn part_matches(
     args.io.matches(part.io)
         && args.kind.is_none_or(|kind| kind.matches(part.kind))
         && regex.is_none_or(|regex| regex.is_match(&part.text))
+        && tags_match(&args.tag, &part.tags)
+}
+
+fn tags_match(filter: &[String], tags: &[String]) -> bool {
+    filter.iter().all(|t| tags.iter().any(|pt| pt == t))
 }
 
 fn resolve_cwd(cwd: Option<&Path>) -> Result<std::path::PathBuf> {
     Ok(cwd
         .map(Path::to_path_buf)
         .unwrap_or(std::env::current_dir().context("Failed to resolve current directory")?))
+}
+
+fn execute_semantic(args: &WorkSemanticArgs) -> Result<()> {
+    let cwd = resolve_cwd(args.cwd.as_deref())?;
+    let filter_tags = args.tag.clone();
+    let records = current_work_record_index(&AgentProvider::all().iter().map(|s| s.provider).collect::<Vec<_>>(), &cwd, None)?;
+    let results = semantic_search(
+        records.records(),
+        &args.query,
+        args.limit,
+        |record| tags_match_record(&record.parts, &filter_tags),
+    );
+    if results.is_empty() {
+        println!(
+            "No semantically relevant records found for `{}`",
+            args.query
+        );
+        return Ok(());
+    }
+    for result in &results {
+        let record = records
+            .resolve(&result.record_ref)
+            .with_context(|| format!("Record not found: {}", result.record_ref))?;
+        let snippet = show::summary_text(
+            &record.combined_text().chars().take(200).collect::<String>(),
+        );
+        println!(
+            "{}  [{:<5}]  {}  (score: {}, terms: {})",
+            result.record_ref,
+            record.kind_label(),
+            snippet,
+            result.score,
+            result.matched_terms.join(", "),
+        );
+    }
+    Ok(())
+}
+
+fn execute_links(args: &WorkLinksArgs) -> Result<()> {
+    let cwd = resolve_cwd(args.cwd.as_deref())?;
+    let records = current_work_record_index(
+        &AgentProvider::all().iter().map(|s| s.provider).collect::<Vec<_>>(),
+        &cwd,
+        None,
+    )?;
+    let mut links: Vec<&WorkLink> = records.infer_links().iter().collect();
+    if let Some(kind) = &args.kind {
+        let wanted = match kind.to_lowercase().as_str() {
+            "caused_by" => WorkLinkKind::CausedBy,
+            "follows_up" => WorkLinkKind::FollowsUp,
+            "references" => WorkLinkKind::References,
+            _ => bail!("Unknown link kind `{kind}`; expected caused_by, follows_up, or references"),
+        };
+        links.retain(|l| l.kind == wanted);
+    }
+    if let Some(ref_prefix) = &args.ref_ {
+        links.retain(|l| {
+            l.from.to_string().starts_with(ref_prefix) || l.to.to_string().starts_with(ref_prefix)
+        });
+    }
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&links)?);
+        return Ok(());
+    }
+    if links.is_empty() {
+        println!("No causal links found.");
+        return Ok(());
+    }
+    for link in &links {
+        println!(
+            "{}  →  {}  [{}]",
+            link.from,
+            link.to,
+            serde_json::to_value(&link.kind)
+                .unwrap()
+                .as_str()
+                .unwrap_or("?")
+        );
+    }
+    Ok(())
+}
+
+fn tags_match_record(parts: &[sivtr_core::record::WorkPart], filter: &[String]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    parts.iter().any(|p| tags_match(filter, &p.tags))
 }
 
 fn build_session_items(records: &[WorkRecord]) -> Vec<WorkSessionListItem> {
@@ -418,6 +517,7 @@ mod tests {
                     label: None,
                     text: "user prompt".to_string(),
                     ansi: None,
+                    tags: Vec::new(),
                 },
                 WorkPart {
                     io: WorkPartIo::Output,
@@ -427,6 +527,7 @@ mod tests {
                     label: None,
                     text: "assistant reply".to_string(),
                     ansi: None,
+                    tags: Vec::new(),
                 },
             ],
         }
