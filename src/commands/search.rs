@@ -507,11 +507,7 @@ fn comparable_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn execute_semantic_search(
-    args: &SearchArgs,
-    cwd: &Path,
-    records: &[WorkRecord],
-) -> Result<()> {
+fn execute_semantic_search(args: &SearchArgs, cwd: &Path, records: &[WorkRecord]) -> Result<()> {
     let query = args
         .match_
         .as_deref()

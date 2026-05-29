@@ -10,8 +10,7 @@ use std::fmt;
 use std::path::Path;
 
 use crate::cli::{
-    WorkCommand, WorkLinksArgs, WorkPartsArgs, WorkRecordsArgs, WorkSemanticArgs,
-    WorkSessionsArgs,
+    WorkCommand, WorkLinksArgs, WorkPartsArgs, WorkRecordsArgs, WorkSemanticArgs, WorkSessionsArgs,
 };
 use crate::commands::records::current_work_record_index;
 use crate::commands::show;
@@ -197,13 +196,17 @@ fn resolve_cwd(cwd: Option<&Path>) -> Result<std::path::PathBuf> {
 fn execute_semantic(args: &WorkSemanticArgs) -> Result<()> {
     let cwd = resolve_cwd(args.cwd.as_deref())?;
     let filter_tags = args.tag.clone();
-    let records = current_work_record_index(&AgentProvider::all().iter().map(|s| s.provider).collect::<Vec<_>>(), &cwd, None)?;
-    let results = semantic_search(
-        records.records(),
-        &args.query,
-        args.limit,
-        |record| tags_match_record(&record.parts, &filter_tags),
-    );
+    let records = current_work_record_index(
+        &AgentProvider::all()
+            .iter()
+            .map(|s| s.provider)
+            .collect::<Vec<_>>(),
+        &cwd,
+        None,
+    )?;
+    let results = semantic_search(records.records(), &args.query, args.limit, |record| {
+        tags_match_record(&record.parts, &filter_tags)
+    });
     if results.is_empty() {
         println!(
             "No semantically relevant records found for `{}`",
@@ -215,9 +218,8 @@ fn execute_semantic(args: &WorkSemanticArgs) -> Result<()> {
         let record = records
             .resolve(&result.record_ref)
             .with_context(|| format!("Record not found: {}", result.record_ref))?;
-        let snippet = show::summary_text(
-            &record.combined_text().chars().take(200).collect::<String>(),
-        );
+        let snippet =
+            show::summary_text(&record.combined_text().chars().take(200).collect::<String>());
         println!(
             "{}  [{:<5}]  {}  (score: {}, terms: {})",
             result.record_ref,
@@ -233,7 +235,10 @@ fn execute_semantic(args: &WorkSemanticArgs) -> Result<()> {
 fn execute_links(args: &WorkLinksArgs) -> Result<()> {
     let cwd = resolve_cwd(args.cwd.as_deref())?;
     let records = current_work_record_index(
-        &AgentProvider::all().iter().map(|s| s.provider).collect::<Vec<_>>(),
+        &AgentProvider::all()
+            .iter()
+            .map(|s| s.provider)
+            .collect::<Vec<_>>(),
         &cwd,
         None,
     )?;

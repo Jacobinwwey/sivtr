@@ -1509,7 +1509,7 @@ mod tests {
                     label: Some("user".to_string()),
                     text: "user".to_string(),
                     ansi: None,
-                tags: Vec::new(),
+                    tags: Vec::new(),
                 },
                 WorkPart {
                     io: WorkPartIo::Output,
@@ -1518,7 +1518,7 @@ mod tests {
                     occurred_at: None,
                     label: Some("assistant".to_string()),
                     text: "ok".to_string(),
-                tags: Vec::new(),
+                    tags: Vec::new(),
                     ansi: None,
                 },
             ],
