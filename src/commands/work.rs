@@ -212,21 +212,23 @@ fn execute_semantic(args: &WorkSemanticArgs) -> Result<()> {
         );
         return Ok(());
     }
+    let anchors: Vec<WorkRef> = results.iter().map(|r| r.record_ref.clone()).collect();
+    let matched = workset::records_for_anchors(records.records(), &anchors);
+    let mut set = WorkSet::with_anchors(cwd.display().to_string(), matched, anchors);
+    set.save_last()?;
     for result in &results {
         let record = records
             .resolve(&result.record_ref)
             .with_context(|| format!("Record not found: {}", result.record_ref))?;
-        let snippet =
-            show::summary_text(&record.combined_text().chars().take(200).collect::<String>());
-        println!(
-            "{}  [{:<5}]  {}  (score: {}, terms: {})",
+        eprintln!(
+            "{}  [{:<5}]  (score: {}, terms: {})",
             result.record_ref,
             record.kind_label(),
-            snippet,
             result.score,
             result.matched_terms.join(", "),
         );
     }
+    show::print_workset(&set, show::resolve_output_format(None, false, false, true))?;
     Ok(())
 }
 
@@ -246,13 +248,16 @@ fn execute_links(args: &WorkLinksArgs) -> Result<()> {
             "caused_by" => WorkLinkKind::CausedBy,
             "follows_up" => WorkLinkKind::FollowsUp,
             "references" => WorkLinkKind::References,
-            _ => bail!("Unknown link kind `{kind}`; expected caused_by, follows_up, or references"),
+            _ => bail!(
+                "Unknown link kind `{kind}`; expected caused_by, follows_up, or references"
+            ),
         };
         links.retain(|l| l.kind == wanted);
     }
     if let Some(ref_prefix) = &args.ref_ {
         links.retain(|l| {
-            l.from.to_string().starts_with(ref_prefix) || l.to.to_string().starts_with(ref_prefix)
+            l.from.to_string().starts_with(ref_prefix)
+                || l.to.to_string().starts_with(ref_prefix)
         });
     }
     if args.json {
@@ -264,15 +269,11 @@ fn execute_links(args: &WorkLinksArgs) -> Result<()> {
         return Ok(());
     }
     for link in &links {
-        println!(
-            "{}  →  {}  [{}]",
-            link.from,
-            link.to,
-            serde_json::to_value(link.kind)
-                .unwrap()
-                .as_str()
-                .unwrap_or("?")
-        );
+        let kind_str = serde_json::to_value(link.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| format!("{:?}", link.kind));
+        println!("{}  →  {}  [{}]", link.from, link.to, kind_str);
     }
     Ok(())
 }

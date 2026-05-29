@@ -57,7 +57,13 @@ pub fn execute(args: &SearchArgs) -> Result<()> {
     }
 
     if args.semantic {
-        return execute_semantic_search(args, &records);
+        return execute_semantic_search(
+            args,
+            &records,
+            time_range.as_ref(),
+            min_duration_ms,
+            max_duration_ms,
+        );
     }
 
     let mut matches = anchors
@@ -507,13 +513,34 @@ fn comparable_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn execute_semantic_search(args: &SearchArgs, records: &[WorkRecord]) -> Result<()> {
+fn execute_semantic_search(
+    args: &SearchArgs,
+    records: &[WorkRecord],
+    time_range: Option<&crate::commands::time_filter::TimeRange>,
+    min_duration_ms: Option<u64>,
+    max_duration_ms: Option<u64>,
+) -> Result<()> {
     let query = args
         .match_
         .as_deref()
         .context("--match is required with --semantic")?;
     let limit = args.limit.or(args.latest).unwrap_or(20);
-    let results = semantic_search(records, query, limit, |_| true);
+    let results = semantic_search(records, query, limit, |record| {
+        status_matches(
+            args.status,
+            record
+                .status
+                .as_ref()
+                .map(|s| s.outcome)
+                .unwrap_or(WorkOutcome::Unknown),
+        ) && exit_code_matches(
+            args.exit_code,
+            record.status.as_ref().and_then(|s| s.exit_code),
+        ) && duration_matches(min_duration_ms, max_duration_ms, record.time.duration_ms)
+            && time_range
+                .as_ref()
+                .is_none_or(|range| range.contains_record_time(record.time.primary_at()))
+    });
     if args.json {
         let json_results: Vec<serde_json::Value> = results
             .iter()
