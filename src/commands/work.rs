@@ -2,9 +2,7 @@ use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde::Serialize;
 use sivtr_core::ai::AgentProvider;
-use sivtr_core::record::{
-    semantic_search, WorkLinkKind, WorkRecord, WorkRef, WorkRefTarget,
-};
+use sivtr_core::record::{semantic_search, WorkLinkKind, WorkRecord, WorkRef, WorkRefTarget};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
