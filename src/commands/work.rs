@@ -242,7 +242,7 @@ fn execute_links(args: &WorkLinksArgs) -> Result<()> {
         &cwd,
         None,
     )?;
-    let mut links: Vec<&WorkLink> = records.infer_links().iter().collect();
+    let mut links = records.infer_links();
     if let Some(kind) = &args.kind {
         let wanted = match kind.to_lowercase().as_str() {
             "caused_by" => WorkLinkKind::CausedBy,
